@@ -14,7 +14,6 @@
 
 from octavia.common import constants
 from octavia.common import data_models
-from octavia.tests.common import constants as ut_constants
 
 
 def generate_load_balancer_tree():
@@ -41,6 +40,7 @@ def generate_load_balancer(vip=None, amphorae=None):
         amp.load_balancer = lb
         amp.load_balancer_id = lb.id
         amp.status = constants.AMPHORA_ALLOCATED
+        amp.vrrp_port_id = 'vrrp_port-{0}-id'.format(VIP_SEED)
     if vip:
         vip.load_balancer = lb
         vip.load_balancer_id = lb.id
@@ -54,8 +54,8 @@ def generate_vip(load_balancer=None):
     global VIP_SEED
     VIP_SEED += 1
     vip = data_models.Vip(ip_address='10.0.0.{0}'.format(VIP_SEED),
-                          subnet_id=ut_constants.MOCK_VIP_SUBNET_ID,
-                          port_id='vrrp-port-{0}'.format(VIP_SEED),
+                          subnet_id='subnet{0}-id'.format(VIP_SEED),
+                          port_id='port{0}-id'.format(VIP_SEED),
                           load_balancer=load_balancer)
     if load_balancer:
         vip.load_balancer_id = load_balancer.id
@@ -69,11 +69,10 @@ def generate_amphora(load_balancer=None):
     global AMP_SEED
     AMP_SEED += 1
     amp = data_models.Amphora(id='amp{0}-id'.format(AMP_SEED),
-                              compute_id='amp{0}-compute-id'.format(AMP_SEED),
+                              compute_id='compute{0}-id'.format(AMP_SEED),
                               status='ACTIVE',
-                              lb_network_ip='99.99.99.{0}'.format(AMP_SEED),
-                              vrrp_ip='55.55.55.{0}'.format(AMP_SEED),
-                              vrrp_port_id='vrrp_port-{0}-id'.format(AMP_SEED),
+                              lb_network_ip='11.0.0.{0}'.format(AMP_SEED),
+                              vrrp_ip='12.0.0.{0}'.format(AMP_SEED),
                               load_balancer=load_balancer)
     if load_balancer:
         amp.load_balancer_id = load_balancer.id

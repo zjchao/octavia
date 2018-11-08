@@ -28,6 +28,7 @@ import six
 from octavia.certificates.common import local as local_common
 from octavia.certificates.generator import cert_gen
 from octavia.common import exceptions
+from octavia.i18n import _LE, _LI
 
 LOG = logging.getLogger(__name__)
 
@@ -44,30 +45,33 @@ class LocalCertGenerator(cert_gen.CertGenerator):
     @classmethod
     def _validate_cert(cls, ca_cert, ca_key, ca_key_pass):
         if not ca_cert:
-            LOG.info("Using CA Certificate from config.")
+            LOG.info(_LI("Using CA Certificate from config."))
             try:
-                ca_cert = open(CONF.certificates.ca_certificate, 'rb').read()
+                ca_cert = open(CONF.certificates.ca_certificate).read()
             except IOError:
                 raise exceptions.CertificateGenerationException(
-                    msg="Failed to load CA Certificate {0}."
+                    msg="Failed to load {0}."
                         .format(CONF.certificates.ca_certificate)
                 )
         if not ca_key:
-            LOG.info("Using CA Private Key from config.")
+            LOG.info(_LI("Using CA Private Key from config."))
             try:
-                ca_key = open(CONF.certificates.ca_private_key, 'rb').read()
+                ca_key = open(CONF.certificates.ca_private_key).read()
             except IOError:
                 raise exceptions.CertificateGenerationException(
-                    msg="Failed to load CA Private Key {0}."
-                        .format(CONF.certificates.ca_private_key)
+                    msg="Failed to load {0}."
+                        .format(CONF.certificates.ca_certificate)
                 )
         if not ca_key_pass:
             ca_key_pass = CONF.certificates.ca_private_key_passphrase
             if ca_key_pass:
-                LOG.info("Using CA Private Key Passphrase from config.")
+                LOG.info(_LI(
+                    "Using CA Private Key Passphrase from config."
+                ))
             else:
-                LOG.info("No Passphrase found for CA Private Key, not using "
-                         "one.")
+                LOG.info(_LI(
+                    "No Passphrase found for CA Private Key, not using one."
+                ))
 
     @classmethod
     def sign_cert(cls, csr, validity, ca_cert=None, ca_key=None,
@@ -87,7 +91,9 @@ class LocalCertGenerator(cert_gen.CertGenerator):
         :return: Signed certificate
         :raises Exception: if certificate signing fails
         """
-        LOG.info("Signing a certificate request using OpenSSL locally.")
+        LOG.info(_LI(
+            "Signing a certificate request using OpenSSL locally."
+        ))
         cls._validate_cert(ca_cert, ca_key, ca_key_pass)
         if not ca_digest:
             ca_digest = CONF.certificates.signing_digest
@@ -99,15 +105,13 @@ class LocalCertGenerator(cert_gen.CertGenerator):
             )
 
         if not ca_cert:
-            with open(CONF.certificates.ca_certificate, 'rb') as f:
+            with open(CONF.certificates.ca_certificate, 'r') as f:
                 ca_cert = f.read()
         if not ca_key:
-            with open(CONF.certificates.ca_private_key, 'rb') as f:
+            with open(CONF.certificates.ca_private_key, 'r') as f:
                 ca_key = f.read()
         if not ca_key_pass:
             ca_key_pass = CONF.certificates.ca_private_key_passphrase
-            if ca_key_pass is not None:
-                ca_key_pass = ca_key_pass.encode('utf-8')
 
         try:
             lo_cert = x509.load_pem_x509_certificate(
@@ -164,7 +168,7 @@ class LocalCertGenerator(cert_gen.CertGenerator):
             return signed_cert.public_bytes(
                 encoding=serialization.Encoding.PEM)
         except Exception as e:
-            LOG.error("Unable to sign certificate.")
+            LOG.error(_LE("Unable to sign certificate."))
             raise exceptions.CertificateGenerationException(msg=e)
 
     @classmethod

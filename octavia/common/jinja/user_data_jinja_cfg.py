@@ -20,6 +20,9 @@ from octavia.common.config import cfg
 from octavia.common import constants
 
 CONF = cfg.CONF
+CONF.import_group('amphora_agent', 'octavia.common.config')
+CONF.import_group('haproxy_amphora', 'octavia.common.config')
+CONF.import_group('health_manager', 'octavia.common.config')
 
 TEMPLATES_DIR = (os.path.dirname(os.path.realpath(__file__)) +
                  constants.TEMPLATES + '/')
@@ -30,7 +33,7 @@ class UserDataJinjaCfg(object):
     def __init__(self):
         template_loader = jinja2.FileSystemLoader(searchpath=os.path.dirname(
             TEMPLATES_DIR))
-        jinja_env = jinja2.Environment(autoescape=True, loader=template_loader)
+        jinja_env = jinja2.Environment(loader=template_loader)
         self.agent_template = jinja_env.get_template(
             constants.USER_DATA_CONFIG_DRIVE_TEMPLATE)
 

@@ -20,13 +20,13 @@ Create Date: 2014-08-15 11:01:14.897223
 
 '''
 
-from alembic import op
-import sqlalchemy as sa
-from sqlalchemy import sql
-
 # revision identifiers, used by Alembic.
 revision = '35dee79d5865'
 down_revision = None
+
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy import sql
 
 
 def upgrade():
@@ -350,3 +350,23 @@ def upgrade():
                                 name=u'fk_load_balancer_amphora_id'),
         sa.PrimaryKeyConstraint(u'amphora_id', u'load_balancer_id')
     )
+
+
+def downgrade():
+    op.drop_table(u'load_balancer_amphora')
+    op.drop_table(u'amphora')
+    op.drop_table(u'listener_statistics')
+    op.drop_table(u'sni')
+    op.drop_table(u'listener')
+    op.drop_table(u'vip')
+    op.drop_table(u'load_balancer')
+    op.drop_table(u'member')
+    op.drop_table(u'session_persistence')
+    op.drop_table(u'health_monitor')
+    op.drop_table(u'pool')
+    op.drop_table(u'provisioning_status')
+    op.drop_table(u'operating_status')
+    op.drop_table(u'session_persistence_type')
+    op.drop_table(u'algorithm')
+    op.drop_table(u'protocol')
+    op.drop_table(u'health_monitor_type')

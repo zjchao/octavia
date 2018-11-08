@@ -19,48 +19,40 @@ Common classes for Barbican certificate handling
 
 import abc
 
-from barbicanclient.v1 import containers
-from oslo_utils import encodeutils
+from barbicanclient import client as barbican_client
 import six
 
 from octavia.certificates.common import cert
 from octavia.common.tls_utils import cert_parser
-from octavia.i18n import _
+from octavia.i18n import _LE
 
 
 class BarbicanCert(cert.Cert):
     """Representation of a Cert based on the Barbican CertificateContainer."""
     def __init__(self, cert_container):
-        if not isinstance(cert_container, containers.CertificateContainer):
-            raise TypeError(_("Retrieved Barbican Container is not of the "
-                              "correct type (certificate)."))
+        if not isinstance(cert_container,
+                          barbican_client.containers.CertificateContainer):
+            raise TypeError(_LE(
+                "Retrieved Barbican Container is not of the correct type "
+                "(certificate)."))
         self._cert_container = cert_container
 
     def get_certificate(self):
         if self._cert_container.certificate:
-            return encodeutils.to_utf8(
-                self._cert_container.certificate.payload)
-        return None
+            return self._cert_container.certificate.payload
 
     def get_intermediates(self):
         if self._cert_container.intermediates:
-            intermediates = encodeutils.to_utf8(
-                self._cert_container.intermediates.payload)
-            return [imd for imd in cert_parser.get_intermediates_pems(
-                intermediates)]
-        return None
+            intermediates = self._cert_container.intermediates.payload
+            return [imd for imd in cert_parser._split_x509s(intermediates)]
 
     def get_private_key(self):
         if self._cert_container.private_key:
-            return encodeutils.to_utf8(
-                self._cert_container.private_key.payload)
-        return None
+            return self._cert_container.private_key.payload
 
     def get_private_key_passphrase(self):
         if self._cert_container.private_key_passphrase:
-            return encodeutils.to_utf8(
-                self._cert_container.private_key_passphrase.payload)
-        return None
+            return self._cert_container.private_key_passphrase.payload
 
 
 @six.add_metaclass(abc.ABCMeta)
@@ -72,20 +64,4 @@ class BarbicanAuth(object):
         :param project_id: Project ID that the request will be used for
         :return: a Barbican Client object
         :raises Exception: if the client cannot be created
-        """
-
-    @abc.abstractmethod
-    def ensure_secret_access(self, context, ref):
-        """Do whatever steps are necessary to ensure future access to a secret.
-
-        :param context: pecan context object
-        :param ref: Reference to a Barbican object
-        """
-
-    @abc.abstractmethod
-    def revoke_secret_access(self, context, ref):
-        """Revoke access of Octavia keystone user to a secret.
-
-        :param context: pecan context object
-        :param ref: Reference to a Barbican object
         """

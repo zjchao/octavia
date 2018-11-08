@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 #    Copyright 2014 Rackspace
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -20,6 +22,8 @@ from oslo_log import log as logging
 from oslo_reports import guru_meditation_report as gmr
 
 from octavia.api import app as api_app
+from octavia.common import service as octavia_service
+from octavia.i18n import _LI
 from octavia import version
 
 
@@ -27,13 +31,14 @@ LOG = logging.getLogger(__name__)
 
 
 def main():
+    octavia_service.prepare_service(sys.argv)
+
     gmr.TextGuruMeditation.setup_autorun(version)
 
-    app = api_app.setup_app(argv=sys.argv)
+    app = api_app.setup_app()
 
-    host = cfg.CONF.api_settings.bind_host
-    port = cfg.CONF.api_settings.bind_port
-    LOG.info("Starting API server on %(host)s:%(port)s",
+    host, port = cfg.CONF.bind_host, cfg.CONF.bind_port
+    LOG.info(_LI("Starting API server on %(host)s:%(port)s"),
              {"host": host, "port": port})
     srv = simple_server.make_server(host, port, app)
 

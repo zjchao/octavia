@@ -27,25 +27,15 @@ class NoopManager(object):
         super(NoopManager, self).__init__()
         self.networkconfigconfig = {}
 
-    def allocate_vip(self, loadbalancer):
-        LOG.debug("Network %s no-op, allocate_vip loadbalancer %s",
-                  self.__class__.__name__, loadbalancer)
-        self.networkconfigconfig[loadbalancer.id] = (
-            loadbalancer, 'allocate_vip')
-        subnet_id = uuidutils.generate_uuid()
-        network_id = uuidutils.generate_uuid()
-        port_id = uuidutils.generate_uuid()
-        ip_address = '198.51.100.1'
-        if loadbalancer.vip:
-            subnet_id = loadbalancer.vip.subnet_id or subnet_id
-            network_id = loadbalancer.vip.network_id or network_id
-            port_id = loadbalancer.vip.port_id or port_id
-            ip_address = loadbalancer.vip.ip_address or ip_address
-        return data_models.Vip(ip_address=ip_address,
-                               subnet_id=subnet_id,
-                               network_id=network_id,
-                               port_id=port_id,
-                               load_balancer_id=loadbalancer.id)
+    def allocate_vip(self, load_balancer):
+        LOG.debug("Network %s no-op, allocate_vip load_balancer %s",
+                  self.__class__.__name__, load_balancer)
+        self.networkconfigconfig[load_balancer] = (
+            load_balancer, 'allocate_vip')
+        return data_models.Vip(ip_address='198.51.100.1',
+                               subnet_id=uuidutils.generate_uuid(),
+                               port_id=uuidutils.generate_uuid(),
+                               load_balancer_id=load_balancer.id)
 
     def deallocate_vip(self, vip):
         LOG.debug("Network %s no-op, deallocate_vip vip %s",
@@ -53,15 +43,15 @@ class NoopManager(object):
         self.networkconfigconfig[vip.ip_address] = (vip,
                                                     'deallocate_vip')
 
-    def plug_vip(self, loadbalancer, vip):
-        LOG.debug("Network %s no-op, plug_vip loadbalancer %s, vip %s",
+    def plug_vip(self, load_balancer, vip):
+        LOG.debug("Network %s no-op, plug_vip load_balancer %s, vip %s",
                   self.__class__.__name__,
-                  loadbalancer.id, vip.ip_address)
-        self.networkconfigconfig[(loadbalancer.id,
-                                  vip.ip_address)] = (loadbalancer, vip,
+                  load_balancer.id, vip.ip_address)
+        self.networkconfigconfig[(load_balancer.id,
+                                  vip.ip_address)] = (load_balancer, vip,
                                                       'plug_vip')
         amps = []
-        for amphora in loadbalancer.amphorae:
+        for amphora in load_balancer.amphorae:
             amps.append(data_models.Amphora(
                 id=amphora.id,
                 compute_id=amphora.compute_id,
@@ -72,12 +62,12 @@ class NoopManager(object):
             ))
         return amps
 
-    def unplug_vip(self, loadbalancer, vip):
-        LOG.debug("Network %s no-op, unplug_vip loadbalancer %s, vip %s",
+    def unplug_vip(self, load_balancer, vip):
+        LOG.debug("Network %s no-op, unplug_vip load_balancer %s, vip %s",
                   self.__class__.__name__,
-                  loadbalancer.id, vip.ip_address)
-        self.networkconfigconfig[(loadbalancer.id,
-                                  vip.ip_address)] = (loadbalancer, vip,
+                  load_balancer.id, vip.ip_address)
+        self.networkconfigconfig[(load_balancer.id,
+                                  vip.ip_address)] = (load_balancer, vip,
                                                       'unplug_vip')
 
     def plug_network(self, compute_id, network_id, ip_address=None):
@@ -108,28 +98,16 @@ class NoopManager(object):
             compute_id, 'get_plugged_networks')
         return []
 
-    def update_vip(self, loadbalancer, for_delete=False):
-        LOG.debug("Network %s no-op, update_vip loadbalancer %s "
-                  "with for delete %s",
-                  self.__class__.__name__, loadbalancer, for_delete)
-        self.networkconfigconfig[loadbalancer.id] = (
-            loadbalancer, for_delete, 'update_vip')
+    def update_vip(self, load_balancer):
+        LOG.debug("Network %s no-op, update_vip load_balancer %s",
+                  self.__class__.__name__, load_balancer)
+        self.networkconfigconfig[load_balancer] = (load_balancer, 'update_vip')
 
     def get_network(self, network_id):
         LOG.debug("Network %s no-op, get_network network_id %s",
                   self.__class__.__name__, network_id)
         self.networkconfigconfig[network_id] = (network_id, 'get_network')
-        network = network_models.Network(id=uuidutils.generate_uuid())
-
-        class ItIsInsideMe(object):
-            def __contains__(self, item):
-                return True
-
-            def __iter__(self):
-                yield uuidutils.generate_uuid()
-
-        network.subnets = ItIsInsideMe()
-        return network
+        return network_models.Network(id=uuidutils.generate_uuid())
 
     def get_subnet(self, subnet_id):
         LOG.debug("Subnet %s no-op, get_subnet subnet_id %s",
@@ -143,82 +121,15 @@ class NoopManager(object):
         self.networkconfigconfig[port_id] = (port_id, 'get_port')
         return network_models.Port(id=uuidutils.generate_uuid())
 
-    def get_network_by_name(self, network_name):
-        LOG.debug("Network %s no-op, get_network_by_name network_name %s",
-                  self.__class__.__name__, network_name)
-        self.networkconfigconfig[network_name] = (network_name,
-                                                  'get_network_by_name')
-        return network_models.Network(id=uuidutils.generate_uuid())
-
-    def get_subnet_by_name(self, subnet_name):
-        LOG.debug("Subnet %s no-op, get_subnet_by_name subnet_name %s",
-                  self.__class__.__name__, subnet_name)
-        self.networkconfigconfig[subnet_name] = (subnet_name,
-                                                 'get_subnet_by_name')
-        return network_models.Subnet(id=uuidutils.generate_uuid())
-
-    def get_port_by_name(self, port_name):
-        LOG.debug("Port %s no-op, get_port_by_name port_name %s",
-                  self.__class__.__name__, port_name)
-        self.networkconfigconfig[port_name] = (port_name, 'get_port_by_name')
-        return network_models.Port(id=uuidutils.generate_uuid())
-
-    def get_port_by_net_id_device_id(self, network_id, device_id):
-        LOG.debug("Port %s no-op, get_port_by_net_id_device_id network_id %s"
-                  " device_id %s",
-                  self.__class__.__name__, network_id, device_id)
-        self.networkconfigconfig[(network_id, device_id)] = (
-            network_id, device_id, 'get_port_by_net_id_device_id')
-        return network_models.Port(id=uuidutils.generate_uuid())
-
     def failover_preparation(self, amphora):
         LOG.debug("failover %s no-op, failover_preparation, amphora id %s",
                   self.__class__.__name__, amphora.id)
 
-    def plug_port(self, amphora, port):
-        LOG.debug("Network %s no-op, plug_port amphora.id %s, port_id "
-                  "%s", self.__class__.__name__, amphora.id, port.id)
-        self.networkconfigconfig[(amphora.id, port.id)] = (
-            amphora, port, 'plug_port')
-
-    def get_network_configs(self, loadbalancer):
-        LOG.debug("Network %s no-op, get_network_configs loadbalancer id %s ",
-                  self.__class__.__name__, loadbalancer.id)
-        self.networkconfigconfig[(loadbalancer.id)] = (
-            loadbalancer, 'get_network_configs')
-
-        amp_configs = {}
-        for amp in loadbalancer.amphorae:
-            vrrp_port = self.get_port(amp.vrrp_port_id)
-            ha_port = self.get_port(amp.ha_port_id)
-            amp_configs[amp.id] = network_models.AmphoraNetworkConfig(
-                amphora=amp,
-                vip_subnet=self.get_subnet(loadbalancer.vip.subnet_id),
-                vip_port=self.get_port(loadbalancer.vip.port_id),
-                vrrp_subnet=self.get_subnet(
-                    vrrp_port.get_subnet_id(amp.vrrp_ip)),
-                vrrp_port=vrrp_port,
-                ha_subnet=self.get_subnet(
-                    ha_port.get_subnet_id(amp.ha_ip)),
-                ha_port=ha_port)
-        return amp_configs
-
-    def wait_for_port_detach(self, amphora):
-        LOG.debug("failover %s no-op, wait_for_port_detach, amphora id %s",
-                  self.__class__.__name__, amphora.id)
-
-    def get_qos_policy(self, qos_policy_id):
-        LOG.debug("Qos Policy %s no-op, get_qos_policy qos_policy_id %s",
-                  self.__class__.__name__, qos_policy_id)
-        self.networkconfigconfig[qos_policy_id] = (qos_policy_id,
-                                                   'get_qos_policy')
-        return qos_policy_id
-
-    def apply_qos_on_port(self, qos_id, port_id):
-        LOG.debug("Network %s no-op, apply_qos_on_port qos_id %s, port_id "
-                  "%s", self.__class__.__name__, qos_id, port_id)
-        self.networkconfigconfig[(qos_id, port_id)] = (
-            qos_id, port_id, 'apply_qos_on_port')
+    def plug_port(self, compute_id, port):
+        LOG.debug("Network %s no-op, plug_port compute_id %s, port_id "
+                  "%s", self.__class__.__name__, compute_id, port.id)
+        self.networkconfigconfig[(compute_id, port)] = (
+            compute_id, port, 'plug_port')
 
 
 class NoopNetworkDriver(driver_base.AbstractNetworkDriver):
@@ -226,17 +137,17 @@ class NoopNetworkDriver(driver_base.AbstractNetworkDriver):
         super(NoopNetworkDriver, self).__init__()
         self.driver = NoopManager()
 
-    def allocate_vip(self, loadbalancer):
-        return self.driver.allocate_vip(loadbalancer)
+    def allocate_vip(self, load_balancer):
+        return self.driver.allocate_vip(load_balancer)
 
     def deallocate_vip(self, vip):
         self.driver.deallocate_vip(vip)
 
-    def plug_vip(self, loadbalancer, vip):
-        return self.driver.plug_vip(loadbalancer, vip)
+    def plug_vip(self, load_balancer, vip):
+        return self.driver.plug_vip(load_balancer, vip)
 
-    def unplug_vip(self, loadbalancer, vip):
-        self.driver.unplug_vip(loadbalancer, vip)
+    def unplug_vip(self, load_balancer, vip):
+        self.driver.unplug_vip(load_balancer, vip)
 
     def plug_network(self, amphora_id, network_id, ip_address=None):
         return self.driver.plug_network(amphora_id, network_id, ip_address)
@@ -248,8 +159,8 @@ class NoopNetworkDriver(driver_base.AbstractNetworkDriver):
     def get_plugged_networks(self, amphora_id):
         return self.driver.get_plugged_networks(amphora_id)
 
-    def update_vip(self, loadbalancer, for_delete=False):
-        self.driver.update_vip(loadbalancer, for_delete)
+    def update_vip(self, load_balancer):
+        self.driver.update_vip(load_balancer)
 
     def get_network(self, network_id):
         return self.driver.get_network(network_id)
@@ -260,32 +171,8 @@ class NoopNetworkDriver(driver_base.AbstractNetworkDriver):
     def get_port(self, port_id):
         return self.driver.get_port(port_id)
 
-    def get_qos_policy(self, qos_policy_id):
-        return self.driver.get_qos_policy(qos_policy_id)
-
-    def get_network_by_name(self, network_name):
-        return self.driver.get_network_by_name(network_name)
-
-    def get_subnet_by_name(self, subnet_name):
-        return self.driver.get_subnet_by_name(subnet_name)
-
-    def get_port_by_name(self, port_name):
-        return self.driver.get_port_by_name(port_name)
-
-    def get_port_by_net_id_device_id(self, network_id, device_id):
-        return self.driver.get_port_by_net_id_device_id(network_id, device_id)
-
     def failover_preparation(self, amphora):
         self.driver.failover_preparation(amphora)
 
-    def plug_port(self, amphora, port):
-        return self.driver.plug_port(amphora, port)
-
-    def get_network_configs(self, loadbalancer):
-        return self.driver.get_network_configs(loadbalancer)
-
-    def wait_for_port_detach(self, amphora):
-        self.driver.wait_for_port_detach(amphora)
-
-    def apply_qos_on_port(self, qos_id, port_id):
-        self.driver.apply_qos_on_port(qos_id, port_id)
+    def plug_port(self, compute_id, port):
+        return self.driver.plug_port(compute_id, port)

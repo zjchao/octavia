@@ -15,7 +15,6 @@
 from oslo_utils import uuidutils
 
 from octavia.amphorae.drivers.noop_driver import driver
-from octavia.common import constants
 from octavia.common import data_models
 from octavia.network import data_models as network_models
 from octavia.tests.unit import base
@@ -45,7 +44,6 @@ class TestNoopAmphoraLoadBalancerDriver(base.TestCase):
         super(TestNoopAmphoraLoadBalancerDriver, self).setUp()
         self.driver = driver.NoopAmphoraLoadBalancerDriver()
         self.listener = data_models.Listener()
-        self.listener.id = uuidutils.generate_uuid()
         self.listener.protocol_port = 80
         self.vip = data_models.Vip()
         self.vip.ip_address = "10.0.0.1"
@@ -63,20 +61,6 @@ class TestNoopAmphoraLoadBalancerDriver(base.TestCase):
                     vip_subnet=network_models.Subnet(id=self.FAKE_UUID_1))
         }
         self.pem_file = 'test_pem_file'
-        self.timeout_dict = {constants.REQ_CONN_TIMEOUT: 1,
-                             constants.REQ_READ_TIMEOUT: 2,
-                             constants.CONN_MAX_RETRIES: 3,
-                             constants.CONN_RETRY_INTERVAL: 4}
-
-    def test_update_amphora_listeners(self):
-        amphorae = [self.amphora]
-        self.driver.update_amphora_listeners([self.listener], 0, amphorae,
-                                             self.timeout_dict)
-        self.assertEqual((self.listener, self.amphora.id, self.timeout_dict,
-                          'update_amp'),
-                         self.driver.driver.amphoraconfig[(
-                             self.listener.id,
-                             self.amphora.id)])
 
     def test_update(self):
         self.driver.update(self.listener, self.vip)
@@ -131,7 +115,7 @@ class TestNoopAmphoraLoadBalancerDriver(base.TestCase):
                              self.amphora.id, self.port.id)])
 
     def test_post_vip_plug(self):
-        self.driver.post_vip_plug(self.amphora, self.load_balancer,
+        self.driver.post_vip_plug(self.load_balancer,
                                   self.amphorae_net_configs)
         expected_method_and_args = (self.load_balancer.id,
                                     self.amphorae_net_configs,

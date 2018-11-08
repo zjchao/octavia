@@ -14,37 +14,68 @@
 
 import uuid
 
-from barbicanclient.v1 import secrets
+from barbicanclient import containers
+from barbicanclient import secrets
 import mock
 
 import octavia.certificates.common.barbican as barbican_common
 import octavia.certificates.common.cert as cert
 import octavia.certificates.manager.barbican as barbican_cert_mgr
 import octavia.tests.unit.base as base
-import octavia.tests.unit.common.sample_configs.sample_certs as sample
 
 
 PROJECT_ID = "12345"
+
+X509_IMDS = """-----BEGIN CERTIFICATE-----
+First Intermediate Data
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+Second Intermediate Data
+-----END CERTIFICATE-----"""
+
+X509_IMDS_LIST = [
+    """-----BEGIN CERTIFICATE-----
+First Intermediate Data
+-----END CERTIFICATE-----""",
+    """-----BEGIN CERTIFICATE-----
+Second Intermediate Data
+-----END CERTIFICATE-----"""
+]
 
 
 class TestBarbicanManager(base.TestCase):
 
     def setUp(self):
-        # Make a fake Secret and contents
+        # Make a fake Container and contents
         self.barbican_endpoint = 'http://localhost:9311/v1'
-        self.secret_uuid = uuid.uuid4()
+        self.container_uuid = uuid.uuid4()
 
-        self.secret_ref = '{0}/secrets/{1}'.format(
-            self.barbican_endpoint, self.secret_uuid
+        self.container_ref = '{0}/containers/{1}'.format(
+            self.barbican_endpoint, self.container_uuid
         )
 
         self.name = 'My Fancy Cert'
-        self.secret = secrets.Secret(
-            api=mock.MagicMock(),
-            payload=sample.PKCS12_BUNDLE
-        )
+        self.private_key = mock.Mock(spec=secrets.Secret)
+        self.certificate = mock.Mock(spec=secrets.Secret)
+        self.intermediates = mock.Mock(spec=secrets.Secret)
+        self.intermediates.payload = X509_IMDS
+        self.private_key_passphrase = mock.Mock(spec=secrets.Secret)
 
-        self.empty_secret = mock.Mock(spec=secrets.Secret)
+        container = mock.Mock(spec=containers.CertificateContainer)
+        container.container_ref = self.container_ref
+        container.name = self.name
+        container.private_key = self.private_key
+        container.certificate = self.certificate
+        container.intermediates = self.intermediates
+        container.private_key_passphrase = self.private_key_passphrase
+        self.container = container
+
+        self.empty_container = mock.Mock(spec=containers.CertificateContainer)
+
+        self.secret1 = mock.Mock(spec=secrets.Secret)
+        self.secret2 = mock.Mock(spec=secrets.Secret)
+        self.secret3 = mock.Mock(spec=secrets.Secret)
+        self.secret4 = mock.Mock(spec=secrets.Secret)
 
         # Mock out the client
         self.bc = mock.Mock()
@@ -54,108 +85,159 @@ class TestBarbicanManager(base.TestCase):
         self.cert_manager = barbican_cert_mgr.BarbicanCertManager()
         self.cert_manager.auth = barbican_auth
 
-        self.context = mock.Mock()
-        self.context.project_id = PROJECT_ID
-
         super(TestBarbicanManager, self).setUp()
 
     def test_store_cert(self):
         # Mock out the client
-        self.bc.secrets.create.return_value = (
-            self.empty_secret)
+        self.bc.containers.create_certificate.return_value = (
+            self.empty_container)
 
         # Attempt to store a cert
-        secret_ref = self.cert_manager.store_cert(
-            context=self.context,
-            certificate=sample.X509_CERT,
-            private_key=sample.X509_CERT_KEY,
-            intermediates=sample.X509_IMDS,
+        container_ref = self.cert_manager.store_cert(
+            project_id=PROJECT_ID,
+            certificate=self.certificate,
+            private_key=self.private_key,
+            intermediates=self.intermediates,
+            private_key_passphrase=self.private_key_passphrase,
             name=self.name
         )
 
-        self.assertEqual(secret_ref, self.empty_secret.secret_ref)
+        self.assertEqual(self.empty_container.container_ref, container_ref)
 
-        # create_secret should be called once with our data
+        # create_secret should be called four times with our data
         calls = [
-            mock.call(payload=mock.ANY, expiration=None,
-                      name=self.name)
+            mock.call(payload=self.certificate, expiration=None,
+                      name=mock.ANY),
+            mock.call(payload=self.private_key, expiration=None,
+                      name=mock.ANY),
+            mock.call(payload=self.intermediates, expiration=None,
+                      name=mock.ANY),
+            mock.call(payload=self.private_key_passphrase, expiration=None,
+                      name=mock.ANY)
         ]
-        self.bc.secrets.create.assert_has_calls(calls)
+        self.bc.secrets.create.assert_has_calls(calls, any_order=True)
+
+        # create_certificate should be called once
+        self.assertEqual(1, self.bc.containers.create_certificate.call_count)
 
         # Container should be stored once
-        self.empty_secret.store.assert_called_once_with()
+        self.empty_container.store.assert_called_once_with()
 
     def test_store_cert_failure(self):
         # Mock out the client
-        self.bc.secrets.create.return_value = (
-            self.empty_secret)
-
-        self.empty_secret.store.side_effect = ValueError()
+        self.bc.containers.create_certificate.return_value = (
+            self.empty_container)
+        test_secrets = [
+            self.secret1,
+            self.secret2,
+            self.secret3,
+            self.secret4
+        ]
+        self.bc.secrets.create.side_effect = test_secrets
+        self.empty_container.store.side_effect = ValueError()
 
         # Attempt to store a cert
         self.assertRaises(
             ValueError,
             self.cert_manager.store_cert,
-            context=self.context,
-            certificate=sample.X509_CERT,
-            private_key=sample.X509_CERT_KEY,
-            intermediates=sample.X509_IMDS,
+            project_id=PROJECT_ID,
+            certificate=self.certificate,
+            private_key=self.private_key,
+            intermediates=self.intermediates,
+            private_key_passphrase=self.private_key_passphrase,
             name=self.name
         )
 
+        # create_secret should be called four times with our data
+        calls = [
+            mock.call(payload=self.certificate, expiration=None,
+                      name=mock.ANY),
+            mock.call(payload=self.private_key, expiration=None,
+                      name=mock.ANY),
+            mock.call(payload=self.intermediates, expiration=None,
+                      name=mock.ANY),
+            mock.call(payload=self.private_key_passphrase, expiration=None,
+                      name=mock.ANY)
+        ]
+        self.bc.secrets.create.assert_has_calls(calls, any_order=True)
+
         # create_certificate should be called once
-        self.assertEqual(1, self.bc.secrets.create.call_count)
+        self.assertEqual(1, self.bc.containers.create_certificate.call_count)
 
         # Container should be stored once
-        self.empty_secret.store.assert_called_once_with()
+        self.empty_container.store.assert_called_once_with()
+
+        # All secrets should be deleted (or at least an attempt made)
+        for s in test_secrets:
+            s.delete.assert_called_once_with()
 
     def test_get_cert(self):
         # Mock out the client
-        self.bc.secrets.get.return_value = self.secret
+        self.bc.containers.register_consumer.return_value = self.container
 
-        # Get the secret data
+        # Get the container data
         data = self.cert_manager.get_cert(
-            context=self.context,
-            cert_ref=self.secret_ref,
-            resource_ref=self.secret_ref,
+            project_id=PROJECT_ID,
+            cert_ref=self.container_ref,
+            resource_ref=self.container_ref,
             service_name='Octavia'
         )
 
-        # 'get_secret' should be called once with the secret_ref
-        self.bc.secrets.get.assert_called_once_with(
-            secret_ref=self.secret_ref
+        # 'register_consumer' should be called once with the container_ref
+        self.bc.containers.register_consumer.assert_called_once_with(
+            container_ref=self.container_ref,
+            url=self.container_ref,
+            name='Octavia'
         )
 
         # The returned data should be a Cert object with the correct values
         self.assertIsInstance(data, cert.Cert)
-        self.assertEqual(sample.X509_CERT_KEY, data.get_private_key())
-        self.assertEqual(sample.X509_CERT, data.get_certificate())
-        self.assertItemsEqual(sample.X509_IMDS_LIST, data.get_intermediates())
-        self.assertIsNone(data.get_private_key_passphrase())
+        self.assertEqual(data.get_private_key(),
+                         self.private_key.payload)
+        self.assertEqual(data.get_certificate(),
+                         self.certificate.payload)
+        self.assertEqual(data.get_intermediates(),
+                         X509_IMDS_LIST)
+        self.assertEqual(data.get_private_key_passphrase(),
+                         self.private_key_passphrase.payload)
 
-    def test_delete_cert_legacy(self):
+    def test_get_cert_no_registration(self):
+        self.bc.containers.get.return_value = self.container
+
+        # Get the container data
+        data = self.cert_manager.get_cert(
+            project_id=PROJECT_ID,
+            cert_ref=self.container_ref, check_only=True
+        )
+
+        # 'get' should be called once with the container_ref
+        self.bc.containers.get.assert_called_once_with(
+            container_ref=self.container_ref
+        )
+
+        # The returned data should be a Cert object with the correct values
+        self.assertIsInstance(data, cert.Cert)
+        self.assertEqual(data.get_private_key(),
+                         self.private_key.payload)
+        self.assertEqual(data.get_certificate(),
+                         self.certificate.payload)
+        self.assertEqual(data.get_intermediates(),
+                         X509_IMDS_LIST)
+        self.assertEqual(data.get_private_key_passphrase(),
+                         self.private_key_passphrase.payload)
+
+    def test_delete_cert(self):
         # Attempt to deregister as a consumer
         self.cert_manager.delete_cert(
-            context=self.context,
-            cert_ref=self.secret_ref,
-            resource_ref=self.secret_ref,
+            project_id=PROJECT_ID,
+            cert_ref=self.container_ref,
+            resource_ref=self.container_ref,
             service_name='Octavia'
         )
 
-        # remove_consumer should be called once with the container_ref (legacy)
+        # remove_consumer should be called once with the container_ref
         self.bc.containers.remove_consumer.assert_called_once_with(
-            container_ref=self.secret_ref,
-            url=self.secret_ref,
+            container_ref=self.container_ref,
+            url=self.container_ref,
             name='Octavia'
-        )
-
-    def test_set_acls(self):
-        self.cert_manager.set_acls(
-            context=self.context,
-            cert_ref=self.secret_ref
-        )
-
-        # our mock_bc should have one call to ensure_secret_access
-        self.cert_manager.auth.ensure_secret_access.assert_called_once_with(
-            self.context, self.secret_ref
         )

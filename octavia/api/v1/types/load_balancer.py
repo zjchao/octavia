@@ -14,7 +14,7 @@
 
 from wsme import types as wtypes
 
-from octavia.api.common import types as base
+from octavia.api.v1.types import base
 from octavia.api.v1.types import listener
 
 
@@ -23,7 +23,6 @@ class VIP(base.BaseType):
     ip_address = wtypes.wsattr(base.IPAddressType())
     port_id = wtypes.wsattr(wtypes.UuidType())
     subnet_id = wtypes.wsattr(wtypes.UuidType())
-    network_id = wtypes.wsattr(wtypes.UuidType())
 
 
 class LoadBalancerResponse(base.BaseType):
@@ -37,8 +36,6 @@ class LoadBalancerResponse(base.BaseType):
     vip = wtypes.wsattr(VIP)
     project_id = wtypes.wsattr(wtypes.StringType())
     listeners = wtypes.wsattr([listener.ListenerResponse])
-    created_at = wtypes.wsattr(wtypes.datetime.datetime)
-    updated_at = wtypes.wsattr(wtypes.datetime.datetime)
 
     @classmethod
     def from_data_model(cls, data_model, children=False):

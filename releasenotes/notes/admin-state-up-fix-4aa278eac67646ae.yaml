@@ -1,7 +1,0 @@
----
-upgrade:
-  - To fix the admin-state-up bug you must upgrade your
-    amphora image.
-fixes:
-  - Fixes admin-state-up=False action for loadbalancer
-    and listener.

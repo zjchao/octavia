@@ -17,18 +17,11 @@ from wsmeext import pecan as wsme_pecan
 
 from octavia.api.v1.controllers import base
 from octavia.api.v1.controllers import load_balancer
-from octavia.api.v1.controllers import quotas
 
 
 class V1Controller(base.BaseController):
 
-    loadbalancers = None
-    quotas = None
-
-    def __init__(self):
-        super(V1Controller, self).__init__()
-        self.loadbalancers = load_balancer.LoadBalancersController()
-        self.quotas = quotas.QuotasController()
+    loadbalancers = load_balancer.LoadBalancersController()
 
     @wsme_pecan.wsexpose(wtypes.text)
     def get(self):

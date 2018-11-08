@@ -16,60 +16,31 @@
 
 import re
 
-import six
 from sqlalchemy.orm import collections
 
 from octavia.common import constants
 
 
 class BaseDataModel(object):
-    def to_dict(self, calling_classes=None, recurse=False, **kwargs):
+
+    # NOTE(brandon-logan) This does not discover dicts for relationship
+    # attributes.
+    def to_dict(self):
         """Converts a data model to a dictionary."""
-        calling_classes = calling_classes or []
         ret = {}
         for attr in self.__dict__:
-            if attr.startswith('_') or not kwargs.get(attr, True):
+            if attr.startswith('_'):
                 continue
-            value = self.__dict__[attr]
-
-            if recurse:
-                if isinstance(getattr(self, attr), list):
-                    ret[attr] = []
-                    for item in value:
-                        if isinstance(item, BaseDataModel):
-                            if type(self) not in calling_classes:
-                                ret[attr].append(
-                                    item.to_dict(calling_classes=(
-                                        calling_classes + [type(self)])))
-                            else:
-                                ret[attr] = None
-                        else:
-                            ret[attr] = item
-                elif isinstance(getattr(self, attr), BaseDataModel):
-                    if type(self) not in calling_classes:
-                        ret[attr] = value.to_dict(
-                            calling_classes=calling_classes + [type(self)])
-                    else:
-                        ret[attr] = None
-                elif six.PY2 and isinstance(value, six.text_type):
-                    ret[attr.encode('utf8')] = value.encode('utf8')
-                else:
-                    ret[attr] = value
+            if isinstance(getattr(self, attr), (BaseDataModel, list)):
+                ret[attr] = None
             else:
-                if isinstance(getattr(self, attr), (BaseDataModel, list)):
-                    ret[attr] = None
-                else:
-                    ret[attr] = value
-
+                ret[attr] = self.__dict__[attr]
         return ret
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
             return self.to_dict() == other.to_dict()
         return False
-
-    def __ne__(self, other):
-        return not self.__eq__(other)
 
     @classmethod
     def from_dict(cls, dict):
@@ -93,7 +64,7 @@ class BaseDataModel(object):
         elif obj.__class__.__name__ in ['SessionPersistence', 'HealthMonitor']:
             return obj.__class__.__name__ + obj.pool_id
         elif obj.__class__.__name__ in ['ListenerStatistics']:
-            return obj.__class__.__name__ + obj.listener_id + obj.amphora_id
+            return obj.__class__.__name__ + obj.listener_id
         elif obj.__class__.__name__ in ['VRRPGroup', 'Vip']:
             return obj.__class__.__name__ + obj.load_balancer_id
         elif obj.__class__.__name__ in ['AmphoraHealth']:
@@ -149,14 +120,11 @@ class BaseDataModel(object):
 class SessionPersistence(BaseDataModel):
 
     def __init__(self, pool_id=None, type=None, cookie_name=None,
-                 pool=None, persistence_timeout=None,
-                 persistence_granularity=None):
+                 pool=None):
         self.pool_id = pool_id
         self.type = type
         self.cookie_name = cookie_name
         self.pool = pool
-        self.persistence_timeout = persistence_timeout
-        self.persistence_granularity = persistence_granularity
 
     def delete(self):
         self.pool.session_persistence = None
@@ -164,58 +132,18 @@ class SessionPersistence(BaseDataModel):
 
 class ListenerStatistics(BaseDataModel):
 
-    def __init__(self, listener_id=None, amphora_id=None, bytes_in=0,
-                 bytes_out=0, active_connections=0,
-                 total_connections=0, request_errors=0):
+    def __init__(self, listener_id=None, bytes_in=None, bytes_out=None,
+                 active_connections=None, total_connections=None,
+                 listener=None):
         self.listener_id = listener_id
-        self.amphora_id = amphora_id
         self.bytes_in = bytes_in
         self.bytes_out = bytes_out
         self.active_connections = active_connections
         self.total_connections = total_connections
-        self.request_errors = request_errors
+        self.listener = listener
 
-    def get_stats(self):
-        stats = {
-            'bytes_in': self.bytes_in,
-            'bytes_out': self.bytes_out,
-            'active_connections': self.active_connections,
-            'total_connections': self.total_connections,
-            'request_errors': self.request_errors,
-        }
-        return stats
-
-    def __iadd__(self, other):
-
-        if isinstance(other, ListenerStatistics):
-            self.bytes_in += other.bytes_in
-            self.bytes_out += other.bytes_out
-            self.request_errors += other.request_errors
-            self.total_connections += other.total_connections
-
-        return self
-
-
-class LoadBalancerStatistics(BaseDataModel):
-
-    def __init__(self, bytes_in=0, bytes_out=0, active_connections=0,
-                 total_connections=0, request_errors=0, listeners=None):
-        self.bytes_in = bytes_in
-        self.bytes_out = bytes_out
-        self.active_connections = active_connections
-        self.total_connections = total_connections
-        self.request_errors = request_errors
-        self.listeners = listeners or []
-
-    def get_stats(self):
-        stats = {
-            'bytes_in': self.bytes_in,
-            'bytes_out': self.bytes_out,
-            'active_connections': self.active_connections,
-            'total_connections': self.total_connections,
-            'request_errors': self.request_errors,
-        }
-        return stats
+    def delete(self):
+        self.listener.stats = None
 
 
 class HealthMonitor(BaseDataModel):
@@ -223,9 +151,7 @@ class HealthMonitor(BaseDataModel):
     def __init__(self, id=None, project_id=None, pool_id=None, type=None,
                  delay=None, timeout=None, fall_threshold=None,
                  rise_threshold=None, http_method=None, url_path=None,
-                 expected_codes=None, enabled=None, pool=None, name=None,
-                 provisioning_status=None, operating_status=None,
-                 created_at=None, updated_at=None):
+                 expected_codes=None, enabled=None, pool=None):
         self.id = id
         self.project_id = project_id
         self.pool_id = pool_id
@@ -239,23 +165,18 @@ class HealthMonitor(BaseDataModel):
         self.expected_codes = expected_codes
         self.enabled = enabled
         self.pool = pool
-        self.provisioning_status = provisioning_status
-        self.operating_status = operating_status
-        self.name = name
-        self.created_at = created_at
-        self.updated_at = updated_at
 
     def delete(self):
         self.pool.health_monitor = None
 
 
 class Pool(BaseDataModel):
+
     def __init__(self, id=None, project_id=None, name=None, description=None,
                  protocol=None, lb_algorithm=None, enabled=None,
                  operating_status=None, members=None, health_monitor=None,
                  session_persistence=None, load_balancer_id=None,
-                 load_balancer=None, listeners=None, l7policies=None,
-                 created_at=None, updated_at=None, provisioning_status=None):
+                 load_balancer=None, listeners=None, l7policies=None):
         self.id = id
         self.project_id = project_id
         self.name = name
@@ -271,9 +192,6 @@ class Pool(BaseDataModel):
         self.session_persistence = session_persistence
         self.listeners = listeners or []
         self.l7policies = l7policies or []
-        self.created_at = created_at
-        self.updated_at = updated_at
-        self.provisioning_status = provisioning_status
 
     def update(self, update_dict):
         for key, value in update_dict.items():
@@ -316,27 +234,18 @@ class Pool(BaseDataModel):
 class Member(BaseDataModel):
 
     def __init__(self, id=None, project_id=None, pool_id=None, ip_address=None,
-                 protocol_port=None, weight=None, backup=None, enabled=None,
-                 subnet_id=None, operating_status=None, pool=None,
-                 created_at=None, updated_at=None, provisioning_status=None,
-                 name=None, monitor_address=None, monitor_port=None):
+                 protocol_port=None, weight=None, enabled=None,
+                 subnet_id=None, operating_status=None, pool=None):
         self.id = id
         self.project_id = project_id
         self.pool_id = pool_id
         self.ip_address = ip_address
         self.protocol_port = protocol_port
         self.weight = weight
-        self.backup = backup
         self.enabled = enabled
         self.subnet_id = subnet_id
         self.operating_status = operating_status
         self.pool = pool
-        self.created_at = created_at
-        self.updated_at = updated_at
-        self.provisioning_status = provisioning_status
-        self.name = name
-        self.monitor_address = monitor_address
-        self.monitor_port = monitor_port
 
     def delete(self):
         for mem in self.pool.members:
@@ -353,10 +262,7 @@ class Listener(BaseDataModel):
                  enabled=None, provisioning_status=None, operating_status=None,
                  tls_certificate_id=None, stats=None, default_pool=None,
                  load_balancer=None, sni_containers=None, peer_port=None,
-                 l7policies=None, pools=None, insert_headers=None,
-                 created_at=None, updated_at=None,
-                 timeout_client_data=None, timeout_member_connect=None,
-                 timeout_member_data=None, timeout_tcp_inspect=None):
+                 l7policies=None, pools=None):
         self.id = id
         self.project_id = project_id
         self.name = name
@@ -376,14 +282,7 @@ class Listener(BaseDataModel):
         self.sni_containers = sni_containers or []
         self.peer_port = peer_port
         self.l7policies = l7policies or []
-        self.insert_headers = insert_headers or {}
         self.pools = pools or []
-        self.created_at = created_at
-        self.updated_at = updated_at
-        self.timeout_client_data = timeout_client_data
-        self.timeout_member_connect = timeout_member_connect
-        self.timeout_member_data = timeout_member_data
-        self.timeout_tcp_inspect = timeout_tcp_inspect
 
     def update(self, update_dict):
         for key, value in update_dict.items():
@@ -392,13 +291,11 @@ class Listener(BaseDataModel):
                 if self.default_pool is not None:
                     l7_pool_ids = [p.redirect_pool_id for p in self.l7policies
                                    if p.redirect_pool_id is not None and
-                                   p.l7rules and p.enabled is True]
+                                   len(p.l7rules) > 0 and p.enabled is True]
                     old_pool = self.default_pool
                     if old_pool.id not in l7_pool_ids:
-                        if old_pool in self.pools:
-                            self.pools.remove(old_pool)
-                        if self in old_pool.listeners:
-                            old_pool.listeners.remove(self)
+                        self.pools.remove(old_pool)
+                        old_pool.listeners.remove(self)
                 if value is not None:
                     pool = self._find_in_graph('Pool' + value)
                     if pool not in self.pools:
@@ -423,8 +320,7 @@ class LoadBalancer(BaseDataModel):
     def __init__(self, id=None, project_id=None, name=None, description=None,
                  provisioning_status=None, operating_status=None, enabled=None,
                  topology=None, vip=None, listeners=None, amphorae=None,
-                 pools=None, vrrp_group=None, server_group_id=None,
-                 created_at=None, updated_at=None, provider=None):
+                 pools=None, vrrp_group=None, server_group_id=None):
 
         self.id = id
         self.project_id = project_id
@@ -440,20 +336,6 @@ class LoadBalancer(BaseDataModel):
         self.amphorae = amphorae or []
         self.pools = pools or []
         self.server_group_id = server_group_id
-        self.created_at = created_at
-        self.updated_at = updated_at
-        self.provider = provider
-
-    def update(self, update_dict):
-        for key, value in update_dict.items():
-            if key == 'vip':
-                if self.vip is not None:
-                    self.vip.update(value)
-                else:
-                    value.update({'load_balancer_id': self.id})
-                    self.vip = Vip(**value)
-            else:
-                setattr(self, key, value)
 
 
 class VRRPGroup(BaseDataModel):
@@ -473,16 +355,12 @@ class VRRPGroup(BaseDataModel):
 class Vip(BaseDataModel):
 
     def __init__(self, load_balancer_id=None, ip_address=None,
-                 subnet_id=None, network_id=None, port_id=None,
-                 load_balancer=None, qos_policy_id=None, octavia_owned=None):
+                 subnet_id=None, port_id=None, load_balancer=None):
         self.load_balancer_id = load_balancer_id
         self.ip_address = ip_address
         self.subnet_id = subnet_id
-        self.network_id = network_id
         self.port_id = port_id
         self.load_balancer = load_balancer
-        self.qos_policy_id = qos_policy_id
-        self.octavia_owned = octavia_owned
 
 
 class SNI(BaseDataModel):
@@ -514,8 +392,7 @@ class Amphora(BaseDataModel):
                  ha_ip=None, vrrp_port_id=None, ha_port_id=None,
                  load_balancer=None, role=None, cert_expiration=None,
                  cert_busy=False, vrrp_interface=None, vrrp_id=None,
-                 vrrp_priority=None, cached_zone=None, created_at=None,
-                 updated_at=None, image_id=None):
+                 vrrp_priority=None):
         self.id = id
         self.load_balancer_id = load_balancer_id
         self.compute_id = compute_id
@@ -532,10 +409,6 @@ class Amphora(BaseDataModel):
         self.load_balancer = load_balancer
         self.cert_expiration = cert_expiration
         self.cert_busy = cert_busy
-        self.cached_zone = cached_zone
-        self.created_at = created_at
-        self.updated_at = updated_at
-        self.image_id = image_id
 
     def delete(self):
         for amphora in self.load_balancer.amphorae:
@@ -554,10 +427,9 @@ class AmphoraHealth(BaseDataModel):
 
 class L7Rule(BaseDataModel):
 
-    def __init__(self, id=None, l7policy_id=None, type=None, enabled=None,
+    def __init__(self, id=None, l7policy_id=None, type=None,
                  compare_type=None, key=None, value=None, l7policy=None,
-                 invert=False, provisioning_status=None, operating_status=None,
-                 project_id=None, created_at=None, updated_at=None):
+                 invert=False):
         self.id = id
         self.l7policy_id = l7policy_id
         self.type = type
@@ -566,12 +438,6 @@ class L7Rule(BaseDataModel):
         self.value = value
         self.l7policy = l7policy
         self.invert = invert
-        self.provisioning_status = provisioning_status
-        self.operating_status = operating_status
-        self.project_id = project_id
-        self.created_at = created_at
-        self.updated_at = updated_at
-        self.enabled = enabled
 
     def delete(self):
         if len(self.l7policy.l7rules) == 1:
@@ -590,9 +456,7 @@ class L7Policy(BaseDataModel):
     def __init__(self, id=None, name=None, description=None, listener_id=None,
                  action=None, redirect_pool_id=None, redirect_url=None,
                  position=None, listener=None, redirect_pool=None,
-                 enabled=None, l7rules=None, provisioning_status=None,
-                 operating_status=None, project_id=None, created_at=None,
-                 updated_at=None, redirect_prefix=None):
+                 enabled=None, l7rules=None):
         self.id = id
         self.name = name
         self.description = description
@@ -605,12 +469,6 @@ class L7Policy(BaseDataModel):
         self.redirect_pool = redirect_pool
         self.enabled = enabled
         self.l7rules = l7rules or []
-        self.provisioning_status = provisioning_status
-        self.operating_status = operating_status
-        self.project_id = project_id
-        self.created_at = created_at
-        self.updated_at = updated_at
-        self.redirect_prefix = redirect_prefix
 
     def _conditionally_remove_pool_links(self, pool):
         """Removes links to the given pool from parent objects.
@@ -625,7 +483,7 @@ class L7Policy(BaseDataModel):
             listener_l7pools = [
                 p.redirect_pool for p in self.listener.l7policies
                 if p.redirect_pool is not None and
-                p.l7rules and p.enabled is True and
+                len(p.l7rules) > 0 and p.enabled is True and
                 p.id != self.id]
             if pool not in listener_l7pools:
                 self.listener.pools.remove(pool)
@@ -639,9 +497,10 @@ class L7Policy(BaseDataModel):
                 self.redirect_url = None
                 pool = self._find_in_graph('Pool' + value)
                 self.redirect_pool = pool
-                if self.l7rules and (self.enabled is True or (
-                        'enabled' in update_dict.keys() and
-                        update_dict['enabled'] is True)):
+                if len(self.l7rules) > 0 and (self.enabled is True or
+                                              ('enabled' in update_dict.keys()
+                                               and update_dict['enabled']
+                                               is True)):
                     if pool not in self.listener.pools:
                         self.listener.pools.append(pool)
                     if self.listener not in pool.listeners:
@@ -661,15 +520,15 @@ class L7Policy(BaseDataModel):
                 self.listener.l7policies.insert(value - 1, self)
             elif key == 'enabled':
                 if (value is True and self.action ==
-                        constants.L7POLICY_ACTION_REDIRECT_TO_POOL and
-                        self.redirect_pool is not None and
-                        self.l7rules and
-                        self.redirect_pool not in self.listener.pools):
+                        constants.L7POLICY_ACTION_REDIRECT_TO_POOL
+                        and self.redirect_pool is not None
+                        and len(self.l7rules) > 0
+                        and self.redirect_pool not in self.listener.pools):
                     self.listener.pools.append(self.redirect_pool)
                     self.redirect_pool.listeners.append(self.listener)
                 elif (value is False and self.action ==
-                        constants.L7POLICY_ACTION_REDIRECT_TO_POOL and
-                        self.redirect_pool is not None):
+                        constants.L7POLICY_ACTION_REDIRECT_TO_POOL
+                        and self.redirect_pool is not None):
                     self._conditionally_remove_pool_links(
                         self.redirect_pool)
             setattr(self, key, value)
@@ -684,30 +543,3 @@ class L7Policy(BaseDataModel):
             if p.id == self.id:
                 self.listener.l7policies.remove(p)
                 break
-
-
-class Quotas(BaseDataModel):
-
-    def __init__(self,
-                 project_id=None,
-                 load_balancer=None,
-                 listener=None,
-                 pool=None,
-                 health_monitor=None,
-                 member=None,
-                 in_use_health_monitor=None,
-                 in_use_listener=None,
-                 in_use_load_balancer=None,
-                 in_use_member=None,
-                 in_use_pool=None):
-        self.project_id = project_id
-        self.health_monitor = health_monitor
-        self.listener = listener
-        self.load_balancer = load_balancer
-        self.pool = pool
-        self.member = member
-        self.in_use_health_monitor = in_use_health_monitor
-        self.in_use_listener = in_use_listener
-        self.in_use_load_balancer = in_use_load_balancer
-        self.in_use_member = in_use_member
-        self.in_use_pool = in_use_pool

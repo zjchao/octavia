@@ -14,7 +14,7 @@
 
 from wsme import types as wtypes
 
-from octavia.api.common import types as base
+from octavia.api.v1.types import base
 from octavia.api.v1.types import health_monitor
 from octavia.api.v1.types import member
 from octavia.common import constants
@@ -36,7 +36,7 @@ class SessionPersistencePOST(base.BaseType):
 class SessionPersistencePUT(base.BaseType):
     """Defines attributes that are acceptable of a PUT request."""
     type = wtypes.wsattr(wtypes.Enum(str, *constants.SUPPORTED_SP_TYPES))
-    cookie_name = wtypes.wsattr(wtypes.text, default=None)
+    cookie_name = wtypes.wsattr(wtypes.text)
 
 
 class PoolResponse(base.BaseType):
@@ -52,8 +52,6 @@ class PoolResponse(base.BaseType):
     project_id = wtypes.wsattr(wtypes.StringType())
     health_monitor = wtypes.wsattr(health_monitor.HealthMonitorResponse)
     members = wtypes.wsattr([member.MemberResponse])
-    created_at = wtypes.wsattr(wtypes.datetime.datetime)
-    updated_at = wtypes.wsattr(wtypes.datetime.datetime)
 
     @classmethod
     def from_data_model(cls, data_model, children=False):
@@ -97,7 +95,6 @@ class PoolPOST(base.BaseType):
         wtypes.Enum(str, *constants.SUPPORTED_LB_ALGORITHMS),
         mandatory=True)
     session_persistence = wtypes.wsattr(SessionPersistencePOST)
-    # TODO(johnsom) Remove after deprecation (R series)
     project_id = wtypes.wsattr(wtypes.StringType(max_length=36))
     health_monitor = wtypes.wsattr(health_monitor.HealthMonitorPOST)
     members = wtypes.wsattr([member.MemberPOST])

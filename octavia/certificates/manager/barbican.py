@@ -1,5 +1,4 @@
 # Copyright (c) 2014 Rackspace US, Inc
-# Copyright (c) 2017 GoDaddy
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -15,21 +14,17 @@
 #    under the License.
 
 """
-Cert manager implementation for Barbican using a single PKCS12 secret
+Cert manager implementation for Barbican
 """
-from OpenSSL import crypto
-
 from oslo_config import cfg
 from oslo_log import log as logging
-from oslo_utils import encodeutils
 from oslo_utils import excutils
 from stevedore import driver as stevedore_driver
 
-from octavia.certificates.common import pkcs12
-from octavia.certificates.manager import barbican_legacy
+from octavia.certificates.common import barbican as barbican_common
 from octavia.certificates.manager import cert_mgr
-from octavia.common import exceptions
-from octavia.common.tls_utils import cert_parser
+from octavia.i18n import _LE, _LI, _LW
+
 
 LOG = logging.getLogger(__name__)
 
@@ -45,12 +40,11 @@ class BarbicanCertManager(cert_mgr.CertManager):
             invoke_on_load=True,
         ).driver
 
-    def store_cert(self, context, certificate, private_key, intermediates=None,
-                   private_key_passphrase=None, expiration=None,
-                   name="PKCS12 Certificate Bundle"):
+    def store_cert(self, project_id, certificate, private_key,
+                   intermediates=None, private_key_passphrase=None,
+                   expiration=None, name='Octavia TLS Cert'):
         """Stores a certificate in the certificate manager.
 
-        :param context: Oslo context of the request
         :param certificate: PEM encoded TLS certificate
         :param private_key: private key for the supplied certificate
         :param intermediates: ordered and concatenated intermediate certs
@@ -61,42 +55,74 @@ class BarbicanCertManager(cert_mgr.CertManager):
         :returns: the container_ref of the stored cert
         :raises Exception: if certificate storage fails
         """
-        connection = self.auth.get_barbican_client(context.project_id)
+        connection = self.auth.get_barbican_client(project_id)
 
-        LOG.info("Storing certificate secret '%s' in Barbican.", name)
-        p12 = crypto.PKCS12()
-        p12.set_friendlyname(encodeutils.to_utf8(name))
-        x509_cert = crypto.load_certificate(crypto.FILETYPE_PEM, certificate)
-        p12.set_certificate(x509_cert)
-        x509_pk = crypto.load_privatekey(crypto.FILETYPE_PEM, private_key)
-        p12.set_privatekey(x509_pk)
-        if intermediates:
-            cert_ints = list(cert_parser.get_intermediates_pems(intermediates))
-            x509_ints = [
-                crypto.load_certificate(crypto.FILETYPE_PEM, ci)
-                for ci in cert_ints]
-            p12.set_ca_certificates(x509_ints)
-        if private_key_passphrase:
-            raise exceptions.CertificateStorageException(
-                "Passphrase protected PKCS12 certificates are not supported.")
+        LOG.info(_LI(
+            "Storing certificate container '{0}' in Barbican."
+        ).format(name))
+
+        certificate_secret = None
+        private_key_secret = None
+        intermediates_secret = None
+        pkp_secret = None
 
         try:
             certificate_secret = connection.secrets.create(
-                payload=p12.export(),
+                payload=certificate,
                 expiration=expiration,
-                name=name
+                name="Certificate"
             )
-            certificate_secret.store()
-            return certificate_secret.secret_ref
-        except Exception as e:
-            with excutils.save_and_reraise_exception():
-                LOG.error('Error storing certificate data: %s', e)
+            private_key_secret = connection.secrets.create(
+                payload=private_key,
+                expiration=expiration,
+                name="Private Key"
+            )
+            certificate_container = connection.containers.create_certificate(
+                name=name,
+                certificate=certificate_secret,
+                private_key=private_key_secret
+            )
+            if intermediates:
+                intermediates_secret = connection.secrets.create(
+                    payload=intermediates,
+                    expiration=expiration,
+                    name="Intermediates"
+                )
+                certificate_container.intermediates = intermediates_secret
+            if private_key_passphrase:
+                pkp_secret = connection.secrets.create(
+                    payload=private_key_passphrase,
+                    expiration=expiration,
+                    name="Private Key Passphrase"
+                )
+                certificate_container.private_key_passphrase = pkp_secret
 
-    def get_cert(self, context, cert_ref, resource_ref=None, check_only=False,
-                 service_name=None):
+            certificate_container.store()
+            return certificate_container.container_ref
+        except Exception as e:
+            for i in [certificate_secret, private_key_secret,
+                      intermediates_secret, pkp_secret]:
+                if i and i.secret_ref:
+                    old_ref = i.secret_ref
+                    try:
+                        i.delete()
+                        LOG.info(_LI(
+                            "Deleted secret {0} ({1}) during rollback."
+                        ).format(i.name, old_ref))
+                    except Exception:
+                        LOG.warning(_LW(
+                            "Failed to delete {0} ({1}) during rollback. This "
+                            "might not be a problem."
+                        ).format(i.name, old_ref))
+            with excutils.save_and_reraise_exception():
+                LOG.error(_LE(
+                    "Error storing certificate data: {0}"
+                ).format(str(e)))
+
+    def get_cert(self, project_id, cert_ref, resource_ref=None,
+                 check_only=False, service_name='Octavia'):
         """Retrieves the specified cert and registers as a consumer.
 
-        :param context: Oslo context of the request
         :param cert_ref: the UUID of the cert to retrieve
         :param resource_ref: Full HATEOAS reference to the consuming resource
         :param check_only: Read Certificate data without registering
@@ -106,48 +132,52 @@ class BarbicanCertManager(cert_mgr.CertManager):
                  certificate data
         :raises Exception: if certificate retrieval fails
         """
-        connection = self.auth.get_barbican_client(context.project_id)
+        connection = self.auth.get_barbican_client(project_id)
 
-        LOG.info('Loading certificate secret %s from Barbican.', cert_ref)
+        LOG.info(_LI(
+            "Loading certificate container {0} from Barbican."
+        ).format(cert_ref))
         try:
-            cert_secret = connection.secrets.get(secret_ref=cert_ref)
-            return pkcs12.PKCS12Cert(cert_secret.payload)
-        except Exception:
-            # If our get fails, try with the legacy driver.
-            # TODO(rm_work): Remove this code when the deprecation cycle for
-            # the legacy driver is complete.
-            legacy_mgr = barbican_legacy.BarbicanCertManager()
-            legacy_cert = legacy_mgr.get_cert(
-                context, cert_ref, resource_ref=resource_ref,
-                check_only=check_only, service_name=service_name
-            )
-            return legacy_cert
+            if check_only:
+                cert_container = connection.containers.get(
+                    container_ref=cert_ref
+                )
+            else:
+                cert_container = connection.containers.register_consumer(
+                    container_ref=cert_ref,
+                    name=service_name,
+                    url=resource_ref
+                )
+            return barbican_common.BarbicanCert(cert_container)
+        except Exception as e:
+            with excutils.save_and_reraise_exception():
+                LOG.error(_LE(
+                    "Error getting {0}: {1}"
+                ).format(cert_ref, str(e)))
 
-    def delete_cert(self, context, cert_ref, resource_ref, service_name=None):
+    def delete_cert(self, project_id, cert_ref, resource_ref=None,
+                    service_name='Octavia'):
         """Deregister as a consumer for the specified cert.
 
-        :param context: Oslo context of the request
         :param cert_ref: the UUID of the cert to retrieve
         :param resource_ref: Full HATEOAS reference to the consuming resource
         :param service_name: Friendly name for the consuming service
 
         :raises Exception: if deregistration fails
         """
-        # TODO(rm_work): We won't take any action on a delete in this driver,
-        # but for now try the legacy driver's delete and ignore failure.
+        connection = self.auth.get_barbican_client(project_id)
+
+        LOG.info(_LI(
+            "Deregistering as a consumer of {0} in Barbican."
+        ).format(cert_ref))
         try:
-            legacy_mgr = barbican_legacy.BarbicanCertManager(auth=self.auth)
-            legacy_mgr.delete_cert(
-                context, cert_ref, resource_ref, service_name=service_name)
-        except Exception:
-            # If the delete failed, it was probably because it isn't legacy
-            # (this will be fixed once Secrets have Consumer registration).
-            pass
-
-    def set_acls(self, context, cert_ref):
-        LOG.debug('Setting project ACL for certificate secret...')
-        self.auth.ensure_secret_access(context, cert_ref)
-
-    def unset_acls(self, context, cert_ref):
-        LOG.debug('Unsetting project ACL for certificate secret...')
-        self.auth.revoke_secret_access(context, cert_ref)
+            connection.containers.remove_consumer(
+                container_ref=cert_ref,
+                name=service_name,
+                url=resource_ref
+            )
+        except Exception as e:
+            with excutils.save_and_reraise_exception():
+                LOG.error(_LE(
+                    "Error deregistering as a consumer of {0}: {1}"
+                ).format(cert_ref, str(e)))

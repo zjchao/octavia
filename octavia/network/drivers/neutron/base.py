@@ -18,22 +18,23 @@ from oslo_log import log as logging
 
 from octavia.common import clients
 from octavia.common import data_models
-from octavia.i18n import _
+from octavia.i18n import _LE, _LI
 from octavia.network import base
 from octavia.network import data_models as network_models
 from octavia.network.drivers.neutron import utils
 
 
 LOG = logging.getLogger(__name__)
-DNS_INT_EXT_ALIAS = 'dns-integration'
 SEC_GRP_EXT_ALIAS = 'security-group'
 
 CONF = cfg.CONF
+CONF.import_group('neutron', 'octavia.common.config')
 
 
 class BaseNeutronDriver(base.AbstractNetworkDriver):
 
     def __init__(self):
+        self.sec_grp_enabled = True
         self.neutron_client = clients.NeutronAuth.get_neutron_client(
             endpoint=CONF.neutron.endpoint,
             region=CONF.neutron.region_name,
@@ -42,32 +43,16 @@ class BaseNeutronDriver(base.AbstractNetworkDriver):
             insecure=CONF.neutron.insecure,
             ca_cert=CONF.neutron.ca_certificates_file
         )
-        self._check_extension_cache = {}
-        self.sec_grp_enabled = self._check_extension_enabled(SEC_GRP_EXT_ALIAS)
-        self.dns_integration_enabled = self._check_extension_enabled(
-            DNS_INT_EXT_ALIAS)
-        self.project_id = self.neutron_client.get_auth_info().get(
-            'auth_tenant_id')
+        extensions = self.neutron_client.list_extensions()
+        self._extensions = extensions.get('extensions')
+        self._check_sec_grps()
 
-    def _check_extension_enabled(self, extension_alias):
-        if extension_alias in self._check_extension_cache:
-            status = self._check_extension_cache[extension_alias]
-            LOG.debug('Neutron extension %(ext)s cached as %(status)s',
-                      {
-                          'ext': extension_alias,
-                          'status': 'enabled' if status else 'disabled'
-                      })
-        else:
-            try:
-                self.neutron_client.show_extension(extension_alias)
-                LOG.debug('Neutron extension %(ext)s found enabled',
-                          {'ext': extension_alias})
-                self._check_extension_cache[extension_alias] = True
-            except neutron_client_exceptions.NotFound:
-                LOG.debug('Neutron extension %(ext)s is not enabled',
-                          {'ext': extension_alias})
-                self._check_extension_cache[extension_alias] = False
-        return self._check_extension_cache[extension_alias]
+    def _check_sec_grps(self):
+        aliases = [ext.get('alias') for ext in self._extensions]
+        if SEC_GRP_EXT_ALIAS not in aliases:
+            LOG.info(_LI('Neutron security groups are disabled.  This driver'
+                         'will not manage any security groups.'))
+            self.sec_grp_enabled = False
 
     def _port_to_vip(self, port, load_balancer):
         fixed_ip = None
@@ -77,7 +62,6 @@ class BaseNeutronDriver(base.AbstractNetworkDriver):
                 break
         return data_models.Vip(ip_address=fixed_ip.ip_address,
                                subnet_id=fixed_ip.subnet_id,
-                               network_id=port.network_id,
                                port_id=port.id,
                                load_balancer=load_balancer,
                                load_balancer_id=load_balancer.id)
@@ -113,17 +97,9 @@ class BaseNeutronDriver(base.AbstractNetworkDriver):
         try:
             self.neutron_client.update_port(port_id, port_update)
         except neutron_client_exceptions.PortNotFoundClient as e:
-            raise base.PortNotFound(str(e))
+            raise base.PortNotFound(e.message)
         except Exception as e:
             raise base.NetworkException(str(e))
-
-    def _get_ports_by_security_group(self, sec_grp_id):
-        all_ports = self.neutron_client.list_ports(project=self.project_id)
-        filtered_ports = []
-        for port in all_ports.get('ports', []):
-            if sec_grp_id in port.get('security_groups', []):
-                filtered_ports.append(port)
-        return filtered_ports
 
     def _create_security_group(self, name):
         new_sec_grp = {'security_group': {'name': name}}
@@ -132,30 +108,17 @@ class BaseNeutronDriver(base.AbstractNetworkDriver):
 
     def _create_security_group_rule(self, sec_grp_id, protocol,
                                     direction='ingress', port_min=None,
-                                    port_max=None, ethertype='IPv6'):
+                                    port_max=None):
         rule = {
             'security_group_rule': {
                 'security_group_id': sec_grp_id,
                 'direction': direction,
                 'protocol': protocol,
                 'port_range_min': port_min,
-                'port_range_max': port_max,
-                'ethertype': ethertype,
+                'port_range_max': port_max
             }
         }
         self.neutron_client.create_security_group_rule(rule)
-
-    def apply_qos_on_port(self, qos_id, port_id):
-        body = {
-            'port':
-                {'qos_policy_id': qos_id}
-        }
-        try:
-            self.neutron_client.update_port(port_id, body)
-        except neutron_client_exceptions.PortNotFoundClient as e:
-            raise base.PortNotFound(str(e))
-        except Exception as e:
-            raise base.NetworkException(str(e))
 
     def get_plugged_networks(self, compute_id):
         # List neutron ports associated with the Amphora
@@ -168,83 +131,53 @@ class BaseNeutronDriver(base.AbstractNetworkDriver):
         return [self._port_to_octavia_interface(
                 compute_id, port) for port in ports['ports']]
 
-    def _get_resource(self, resource_type, resource_id):
-        try:
-            resource = getattr(self.neutron_client, 'show_%s' %
-                               resource_type)(resource_id)
-            return getattr(utils, 'convert_%s_dict_to_model' %
-                           resource_type)(resource)
-        except neutron_client_exceptions.NotFound:
-            message = _('{resource_type} not found '
-                        '({resource_type} id: {resource_id}).').format(
-                resource_type=resource_type, resource_id=resource_id)
-            raise getattr(base, '%sNotFound' % ''.join(
-                [w.capitalize() for w in resource_type.split('_')]))(message)
-        except Exception:
-            message = _('Error retrieving {resource_type} '
-                        '({resource_type} id: {resource_id}.').format(
-                resource_type=resource_type, resource_id=resource_id)
-            LOG.exception(message)
-            raise base.NetworkException(message)
-
-    def _get_resources_by_filters(self, resource_type, unique_item=False,
-                                  **filters):
-        """Retrieves item(s) from filters. By default, a list is returned.
-
-        If unique_item set to True, only the first resource is returned.
-        """
-        try:
-            resource = getattr(self.neutron_client, 'list_%ss' %
-                               resource_type)(**filters)
-            conversion_function = getattr(
-                utils,
-                'convert_%s_dict_to_model' % resource_type)
-            if not resource['%ss' % resource_type]:
-                # no items found
-                raise neutron_client_exceptions.NotFound()
-            elif unique_item:
-                return conversion_function(resource['%ss' % resource_type][0])
-            else:
-                return list(map(conversion_function,
-                                resource['%ss' % resource_type]))
-        except neutron_client_exceptions.NotFound:
-            message = _('{resource_type} not found '
-                        '({resource_type} Filters: {filters}.').format(
-                resource_type=resource_type, filters=filters)
-            raise getattr(base, '%sNotFound' % ''.join(
-                [w.capitalize() for w in resource_type.split('_')]))(message)
-        except Exception:
-            message = _('Error retrieving {resource_type} '
-                        '({resource_type} Filters: {filters}.').format(
-                resource_type=resource_type, filters=filters)
-            LOG.exception(message)
-            raise base.NetworkException(message)
-
     def get_network(self, network_id):
-        return self._get_resource('network', network_id)
+        try:
+            network = self.neutron_client.show_network(network_id)
+            return utils.convert_network_dict_to_model(network)
+        except neutron_client_exceptions.NotFound:
+            message = _LE('Network not found '
+                          '(network id: {network_id}.').format(
+                network_id=network_id)
+            LOG.exception(message)
+            raise base.NetworkNotFound(message)
+        except Exception:
+            message = _LE('Error retrieving network '
+                          '(network id: {network_id}.').format(
+                network_id=network_id)
+            LOG.exception(message)
+            raise base.NetworkException(message)
 
     def get_subnet(self, subnet_id):
-        return self._get_resource('subnet', subnet_id)
+        try:
+            subnet = self.neutron_client.show_subnet(subnet_id)
+            return utils.convert_subnet_dict_to_model(subnet)
+        except neutron_client_exceptions.NotFound:
+            message = _LE('Subnet not found '
+                          '(subnet id: {subnet_id}.').format(
+                subnet_id=subnet_id)
+            LOG.exception(message)
+            raise base.SubnetNotFound(message)
+        except Exception:
+            message = _LE('Error retrieving subnet '
+                          '(subnet id: {subnet_id}.').format(
+                subnet_id=subnet_id)
+            LOG.exception(message)
+            raise base.NetworkException(message)
 
     def get_port(self, port_id):
-        return self._get_resource('port', port_id)
-
-    def get_network_by_name(self, network_name):
-        return self._get_resources_by_filters(
-            'network', unique_item=True, name=network_name)
-
-    def get_subnet_by_name(self, subnet_name):
-        return self._get_resources_by_filters(
-            'subnet', unique_item=True, name=subnet_name)
-
-    def get_port_by_name(self, port_name):
-        return self._get_resources_by_filters(
-            'port', unique_item=True, name=port_name)
-
-    def get_port_by_net_id_device_id(self, network_id, device_id):
-        return self._get_resources_by_filters(
-            'port', unique_item=True,
-            network_id=network_id, device_id=device_id)
-
-    def get_qos_policy(self, qos_policy_id):
-        return self._get_resource('qos_policy', qos_policy_id)
+        try:
+            port = self.neutron_client.show_port(port_id)
+            return utils.convert_port_dict_to_model(port)
+        except neutron_client_exceptions.NotFound:
+            message = _LE('Port not found '
+                          '(port id: {port_id}.').format(
+                port_id=port_id)
+            LOG.exception(message)
+            raise base.PortNotFound(message)
+        except Exception:
+            message = _LE('Error retrieving port '
+                          '(port id: {port_id}.').format(
+                port_id=port_id)
+            LOG.exception(message)
+            raise base.NetworkException(message)

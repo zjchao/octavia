@@ -12,8 +12,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import logging
+
 import oslo_db.exception as oslo_exc
-from oslo_log import log as logging
 from oslo_utils import excutils
 import pecan
 from wsme import types as wtypes
@@ -27,6 +28,8 @@ from octavia.common import data_models
 from octavia.common import exceptions
 from octavia.common import validate
 from octavia.db import prepare as db_prepare
+from octavia.i18n import _LI
+
 
 LOG = logging.getLogger(__name__)
 
@@ -51,7 +54,7 @@ class L7PolicyController(base.BaseController):
     def get_all(self):
         """Lists all l7policies of a listener."""
         context = pecan.request.context.get('octavia_context')
-        db_l7policies, _ = self.repositories.l7policy.get_all(
+        db_l7policies = self.repositories.l7policy.get_all(
             context.session, listener_id=self.listener_id)
         return self._convert_db_to_type(db_l7policies,
                                         [l7policy_types.L7PolicyResponse])
@@ -62,8 +65,8 @@ class L7PolicyController(base.BaseController):
                 session, self.load_balancer_id,
                 constants.PENDING_UPDATE, constants.PENDING_UPDATE,
                 listener_ids=[self.listener_id]):
-            LOG.info("L7Policy cannot be created or modified because the "
-                     "Load Balancer is in an immutable state")
+            LOG.info(_LI("L7Policy cannot be created or modified because the "
+                         "Load Balancer is in an immutable state"))
             lb_repo = self.repositories.load_balancer
             db_lb = lb_repo.get(session, id=self.load_balancer_id)
             raise exceptions.ImmutableObject(resource=db_lb._name(),
@@ -74,7 +77,6 @@ class L7PolicyController(base.BaseController):
     def post(self, l7policy):
         """Creates a l7policy on a listener."""
         context = pecan.request.context.get('octavia_context')
-
         l7policy_dict = validate.sanitize_l7policy_api_args(
             l7policy.to_dict(render_unsets=True), create=True)
         # Make sure any pool specified by redirect_pool_id exists
@@ -101,7 +103,7 @@ class L7PolicyController(base.BaseController):
             if ['id'] == de.columns:
                 raise exceptions.IDAlreadyExists()
         try:
-            LOG.info("Sending Creation of L7Policy %s to handler",
+            LOG.info(_LI("Sending Creation of L7Policy %s to handler"),
                      db_l7policy.id)
             self.handler.create(db_l7policy)
         except Exception:
@@ -128,11 +130,8 @@ class L7PolicyController(base.BaseController):
         db_l7policy = self._get_db_l7policy(context.session, id)
         self._test_lb_and_listener_statuses(context.session)
 
-        self.repositories.l7policy.update(
-            context.session, id, provisioning_status=constants.PENDING_UPDATE)
-
         try:
-            LOG.info("Sending Update of L7Policy %s to handler", id)
+            LOG.info(_LI("Sending Update of L7Policy %s to handler"), id)
             self.handler.update(
                 db_l7policy, l7policy_types.L7PolicyPUT(**l7policy_dict))
         except Exception:
@@ -152,7 +151,7 @@ class L7PolicyController(base.BaseController):
         self._test_lb_and_listener_statuses(context.session)
 
         try:
-            LOG.info("Sending Deletion of L7Policy %s to handler",
+            LOG.info(_LI("Sending Deletion of L7Policy %s to handler"),
                      db_l7policy.id)
             self.handler.delete(db_l7policy)
         except Exception:
@@ -166,22 +165,21 @@ class L7PolicyController(base.BaseController):
 
     @pecan.expose()
     def _lookup(self, l7policy_id, *remainder):
-        """Overridden pecan _lookup method for custom routing.
+        """Overriden pecan _lookup method for custom routing.
 
         Verifies that the l7policy passed in the url exists, and if so decides
         which controller, if any, should control be passed.
         """
         context = pecan.request.context.get('octavia_context')
-        if l7policy_id and remainder and remainder[0] == 'l7rules':
+        if l7policy_id and len(remainder) and remainder[0] == 'l7rules':
             remainder = remainder[1:]
             db_l7policy = self.repositories.l7policy.get(
                 context.session, id=l7policy_id)
             if not db_l7policy:
-                LOG.info("L7Policy %s not found.", l7policy_id)
+                LOG.info(_LI("L7Policy %s not found."), l7policy_id)
                 raise exceptions.NotFound(
                     resource=data_models.L7Policy._name(), id=l7policy_id)
             return l7rule.L7RuleController(
                 load_balancer_id=self.load_balancer_id,
                 listener_id=self.listener_id,
                 l7policy_id=db_l7policy.id), remainder
-        return None

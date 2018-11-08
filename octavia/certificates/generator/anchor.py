@@ -19,11 +19,13 @@ import requests
 
 from octavia.certificates.generator import local
 from octavia.common import exceptions
-from octavia.i18n import _
+from octavia.i18n import _LE
+
 
 LOG = logging.getLogger(__name__)
 
 CONF = cfg.CONF
+CONF.import_group('anchor', 'octavia.common.config')
 
 
 class AnchorException(exceptions.CertificateGenerationException):
@@ -56,11 +58,11 @@ class AnchorCertGenerator(local.LocalCertGenerator):
 
             if r.status_code != 200:
                 LOG.debug('Anchor returned: %s', r.content)
-                raise AnchorException(_("Anchor returned Status Code : "
-                                        "{0}").format(str(r.status_code)))
+                raise AnchorException("Anchor returned Status Code : "
+                                      + str(r.status_code))
 
             return r.content
 
         except Exception as e:
-            LOG.error("Unable to sign certificate.")
+            LOG.error(_LE("Unable to sign certificate."))
             raise exceptions.CertificateGenerationException(msg=e)

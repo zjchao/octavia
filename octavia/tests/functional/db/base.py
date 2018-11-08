@@ -12,10 +12,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo_config import fixture as oslo_fixture
+from oslo_config import cfg
+from oslo_db import options as db_options
 from oslo_db.sqlalchemy import test_base
 
-from octavia.common import config
 from octavia.common import constants
 from octavia.db import api as db_api
 from octavia.db import base_models
@@ -30,9 +30,8 @@ class OctaviaDBTestBase(test_base.DbTestCase):
         # session set up in the fixture for test_base.DbTestCase does not work
         # with the API functional tests.  Need to investigate more if this
         # becomes a problem
-        conf = self.useFixture(oslo_fixture.Config(config.cfg.CONF))
-        conf.config(group="database", connection='sqlite://')
-
+        cfg.CONF.register_opts(db_options.database_opts, 'database')
+        cfg.CONF.set_override('connection', 'sqlite://', group='database')
         # needed for closure
         engine = db_api.get_engine()
         session = db_api.get_session()

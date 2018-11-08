@@ -20,12 +20,12 @@ Create Date: 2015-01-10 00:53:57.798213
 
 """
 
-from alembic import op
-import sqlalchemy as sa
-
 # revision identifiers, used by Alembic.
 revision = '14892634e228'
 down_revision = '3a1e1cdb7b27'
+
+from alembic import op
+import sqlalchemy as sa
 
 
 def upgrade():
@@ -36,3 +36,15 @@ def upgrade():
                               existing_type=sa.String(36))
         batch_op.drop_column(u'floating_ip_id')
         batch_op.drop_column(u'floating_ip_network_id')
+
+
+def downgrade():
+    with op.batch_alter_table(u'vip') as batch_op:
+        batch_op.add_column(sa.Column(u'floating_ip_network_id',
+                                      sa.String(36), nullable=True))
+        batch_op.add_column(sa.Column(u'floating_ip_id', sa.String(36),
+                                      nullable=True))
+        batch_op.alter_column(u'port_id', new_column_name=u'net_port_id',
+                              existing_type=sa.String(36))
+        batch_op.alter_column(u'network_id', new_column_name=u'subnet_id',
+                              existing_type=sa.String(36))

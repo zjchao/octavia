@@ -12,7 +12,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 #
-import mock
+
 from taskflow.patterns import linear_flow as flow
 
 from octavia.common import constants
@@ -20,9 +20,6 @@ from octavia.controller.worker.flows import listener_flows
 import octavia.tests.unit.base as base
 
 
-# NOTE: We patch the get_network_driver for all the calls so we don't
-# inadvertently make real calls.
-@mock.patch('octavia.common.utils.get_network_driver')
 class TestListenerFlows(base.TestCase):
 
     def setUp(self):
@@ -30,7 +27,7 @@ class TestListenerFlows(base.TestCase):
 
         super(TestListenerFlows, self).setUp()
 
-    def test_get_create_listener_flow(self, mock_get_net_driver):
+    def test_get_create_listener_flow(self):
 
         listener_flow = self.ListenerFlow.get_create_listener_flow()
 
@@ -42,7 +39,7 @@ class TestListenerFlows(base.TestCase):
         self.assertEqual(2, len(listener_flow.requires))
         self.assertEqual(0, len(listener_flow.provides))
 
-    def test_get_delete_listener_flow(self, mock_get_net_driver):
+    def test_get_delete_listener_flow(self):
 
         listener_flow = self.ListenerFlow.get_delete_listener_flow()
 
@@ -54,7 +51,7 @@ class TestListenerFlows(base.TestCase):
         self.assertEqual(2, len(listener_flow.requires))
         self.assertEqual(0, len(listener_flow.provides))
 
-    def test_get_delete_listener_internal_flow(self, mock_get_net_driver):
+    def test_get_delete_listener_internal_flow(self):
         listener_flow = self.ListenerFlow.get_delete_listener_internal_flow(
             'test-listener')
 
@@ -66,7 +63,7 @@ class TestListenerFlows(base.TestCase):
         self.assertEqual(2, len(listener_flow.requires))
         self.assertEqual(0, len(listener_flow.provides))
 
-    def test_get_update_listener_flow(self, mock_get_net_driver):
+    def test_get_update_listener_flow(self):
 
         listener_flow = self.ListenerFlow.get_update_listener_flow()
 
@@ -80,7 +77,7 @@ class TestListenerFlows(base.TestCase):
         self.assertEqual(4, len(listener_flow.requires))
         self.assertEqual(0, len(listener_flow.provides))
 
-    def test_get_create_all_listeners_flow(self, mock_get_net_driver):
+    def test_get_create_all_listeners_flow(self):
         listeners_flow = self.ListenerFlow.get_create_all_listeners_flow()
         self.assertIsInstance(listeners_flow, flow.Flow)
         self.assertIn(constants.LOADBALANCER, listeners_flow.requires)

@@ -1,4 +1,0 @@
----
-features:
-  - |
-    Add a config variable to disable creation of TLS Terminated listeners.

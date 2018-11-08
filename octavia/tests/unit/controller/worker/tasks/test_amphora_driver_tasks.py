@@ -14,12 +14,9 @@
 #
 
 import mock
-from oslo_config import cfg
-from oslo_config import fixture as oslo_fixture
 from oslo_utils import uuidutils
 from taskflow.types import failure
 
-from octavia.amphorae.driver_exceptions import exceptions as driver_except
 from octavia.common import constants
 from octavia.common import data_models
 from octavia.controller.worker.tasks import amphora_driver_tasks
@@ -31,8 +28,6 @@ AMP_ID = uuidutils.generate_uuid()
 COMPUTE_ID = uuidutils.generate_uuid()
 LISTENER_ID = uuidutils.generate_uuid()
 LB_ID = uuidutils.generate_uuid()
-CONN_MAX_RETRIES = 10
-CONN_RETRY_INTERVAL = 6
 
 _amphora_mock = mock.MagicMock()
 _amphora_mock.id = AMP_ID
@@ -64,43 +59,9 @@ class TestAmphoraDriverTasks(base.TestCase):
 
     def setUp(self):
 
-        _LB_mock.amphorae = [_amphora_mock]
+        _LB_mock.amphorae = _amphora_mock
         _LB_mock.id = LB_ID
-        conf = oslo_fixture.Config(cfg.CONF)
-        conf.config(group="haproxy_amphora",
-                    active_connection_max_retries=CONN_MAX_RETRIES)
-        conf.config(group="haproxy_amphora",
-                    active_connection_rety_interval=CONN_RETRY_INTERVAL)
         super(TestAmphoraDriverTasks, self).setUp()
-
-    def test_amp_listener_update(self,
-                                 mock_driver,
-                                 mock_generate_uuid,
-                                 mock_log,
-                                 mock_get_session,
-                                 mock_listener_repo_get,
-                                 mock_listener_repo_update,
-                                 mock_amphora_repo_update):
-
-        timeout_dict = {constants.REQ_CONN_TIMEOUT: 1,
-                        constants.REQ_READ_TIMEOUT: 2,
-                        constants.CONN_MAX_RETRIES: 3,
-                        constants.CONN_RETRY_INTERVAL: 4}
-
-        amp_list_update_obj = amphora_driver_tasks.AmpListenersUpdate()
-        amp_list_update_obj.execute([_listener_mock], 0,
-                                    [_amphora_mock], timeout_dict)
-
-        mock_driver.update_amphora_listeners.assert_called_once_with(
-            [_listener_mock], 0, [_amphora_mock], timeout_dict)
-
-        mock_driver.update_amphora_listeners.side_effect = Exception('boom')
-
-        amp_list_update_obj.execute([_listener_mock], 0,
-                                    [_amphora_mock], timeout_dict)
-
-        mock_amphora_repo_update.assert_called_once_with(
-            _session_mock, AMP_ID, status=constants.ERROR)
 
     def test_listener_update(self,
                              mock_driver,
@@ -117,16 +78,6 @@ class TestAmphoraDriverTasks(base.TestCase):
         mock_driver.update.assert_called_once_with(_listener_mock, _vip_mock)
 
         # Test the revert
-        amp = listener_update_obj.revert(_load_balancer_mock)
-        repo.ListenerRepository.update.assert_called_once_with(
-            _session_mock,
-            id=LISTENER_ID,
-            provisioning_status=constants.ERROR)
-        self.assertIsNone(amp)
-
-        # Test the revert with exception
-        repo.ListenerRepository.update.reset_mock()
-        mock_listener_repo_update.side_effect = Exception('fail')
         amp = listener_update_obj.revert(_load_balancer_mock)
         repo.ListenerRepository.update.assert_called_once_with(
             _session_mock,
@@ -188,16 +139,6 @@ class TestAmphoraDriverTasks(base.TestCase):
             provisioning_status=constants.ERROR)
         self.assertIsNone(amp)
 
-        # Test the revert with exception
-        repo.ListenerRepository.update.reset_mock()
-        mock_listener_repo_update.side_effect = Exception('fail')
-        amp = listener_stop_obj.revert(_listener_mock)
-        repo.ListenerRepository.update.assert_called_once_with(
-            _session_mock,
-            id=LISTENER_ID,
-            provisioning_status=constants.ERROR)
-        self.assertIsNone(amp)
-
     def test_listener_start(self,
                             mock_driver,
                             mock_generate_uuid,
@@ -220,16 +161,6 @@ class TestAmphoraDriverTasks(base.TestCase):
             provisioning_status=constants.ERROR)
         self.assertIsNone(amp)
 
-        # Test the revert with exception
-        repo.ListenerRepository.update.reset_mock()
-        mock_listener_repo_update.side_effect = Exception('fail')
-        amp = listener_start_obj.revert(_listener_mock)
-        repo.ListenerRepository.update.assert_called_once_with(
-            _session_mock,
-            id=LISTENER_ID,
-            provisioning_status=constants.ERROR)
-        self.assertIsNone(amp)
-
     def test_listener_delete(self,
                              mock_driver,
                              mock_generate_uuid,
@@ -245,16 +176,6 @@ class TestAmphoraDriverTasks(base.TestCase):
         mock_driver.delete.assert_called_once_with(_listener_mock, _vip_mock)
 
         # Test the revert
-        amp = listener_delete_obj.revert(_listener_mock)
-        repo.ListenerRepository.update.assert_called_once_with(
-            _session_mock,
-            id=LISTENER_ID,
-            provisioning_status=constants.ERROR)
-        self.assertIsNone(amp)
-
-        # Test the revert with exception
-        repo.ListenerRepository.update.reset_mock()
-        mock_listener_repo_update.side_effect = Exception('fail')
         amp = listener_delete_obj.revert(_listener_mock)
         repo.ListenerRepository.update.assert_called_once_with(
             _session_mock,
@@ -316,16 +237,6 @@ class TestAmphoraDriverTasks(base.TestCase):
             status=constants.ERROR)
         self.assertIsNone(amp)
 
-        # Test revert with exception
-        repo.AmphoraRepository.update.reset_mock()
-        mock_amphora_repo_update.side_effect = Exception('fail')
-        amp = amphora_finalize_obj.revert(None, _amphora_mock)
-        repo.AmphoraRepository.update.assert_called_once_with(
-            _session_mock,
-            id=AMP_ID,
-            status=constants.ERROR)
-        self.assertIsNone(amp)
-
     def test_amphora_post_network_plug(self,
                                        mock_driver,
                                        mock_generate_uuid,
@@ -343,17 +254,6 @@ class TestAmphoraDriverTasks(base.TestCase):
             assert_called_once_with)(_amphora_mock, _port_mock)
 
         # Test revert
-        amp = amphora_post_network_plug_obj.revert(None, _amphora_mock)
-        repo.AmphoraRepository.update.assert_called_once_with(
-            _session_mock,
-            id=AMP_ID,
-            status=constants.ERROR)
-
-        self.assertIsNone(amp)
-
-        # Test revert with exception
-        repo.AmphoraRepository.update.reset_mock()
-        mock_amphora_repo_update.side_effect = Exception('fail')
         amp = amphora_post_network_plug_obj.revert(None, _amphora_mock)
         repo.AmphoraRepository.update.assert_called_once_with(
             _session_mock,
@@ -394,18 +294,6 @@ class TestAmphoraDriverTasks(base.TestCase):
 
         self.assertIsNone(amp)
 
-        # Test revert with exception
-        repo.AmphoraRepository.update.reset_mock()
-        mock_amphora_repo_update.side_effect = Exception('fail')
-        amp = amphora_post_network_plug_obj.revert(None, _LB_mock,
-                                                   _deltas_mock)
-        repo.AmphoraRepository.update.assert_called_once_with(
-            _session_mock,
-            id=AMP_ID,
-            status=constants.ERROR)
-
-        self.assertIsNone(amp)
-
     @mock.patch('octavia.db.repositories.LoadBalancerRepository.update')
     def test_amphora_post_vip_plug(self,
                                    mock_loadbalancer_repo_update,
@@ -419,74 +307,12 @@ class TestAmphoraDriverTasks(base.TestCase):
 
         amphorae_net_config_mock = mock.Mock()
         amphora_post_vip_plug_obj = amphora_driver_tasks.AmphoraPostVIPPlug()
-        amphora_post_vip_plug_obj.execute(_amphora_mock,
-                                          _LB_mock,
-                                          amphorae_net_config_mock)
+        amphora_post_vip_plug_obj.execute(_LB_mock, amphorae_net_config_mock)
 
         mock_driver.post_vip_plug.assert_called_once_with(
-            _amphora_mock, _LB_mock, amphorae_net_config_mock)
+            _LB_mock, amphorae_net_config_mock)
 
         # Test revert
-        amp = amphora_post_vip_plug_obj.revert(None, _amphora_mock, _LB_mock)
-        repo.AmphoraRepository.update.assert_called_once_with(
-            _session_mock,
-            id=AMP_ID,
-            status=constants.ERROR)
-        repo.LoadBalancerRepository.update.assert_called_once_with(
-            _session_mock,
-            id=LB_ID,
-            provisioning_status=constants.ERROR)
-
-        self.assertIsNone(amp)
-
-        # Test revert with repo exceptions
-        repo.AmphoraRepository.update.reset_mock()
-        repo.LoadBalancerRepository.update.reset_mock()
-        mock_amphora_repo_update.side_effect = Exception('fail')
-        mock_loadbalancer_repo_update.side_effect = Exception('fail')
-        amp = amphora_post_vip_plug_obj.revert(None, _amphora_mock, _LB_mock)
-        repo.AmphoraRepository.update.assert_called_once_with(
-            _session_mock,
-            id=AMP_ID,
-            status=constants.ERROR)
-        repo.LoadBalancerRepository.update.assert_called_once_with(
-            _session_mock,
-            id=LB_ID,
-            provisioning_status=constants.ERROR)
-
-        self.assertIsNone(amp)
-
-    @mock.patch('octavia.db.repositories.LoadBalancerRepository.update')
-    def test_amphorae_post_vip_plug(self,
-                                    mock_loadbalancer_repo_update,
-                                    mock_driver,
-                                    mock_generate_uuid,
-                                    mock_log,
-                                    mock_get_session,
-                                    mock_listener_repo_get,
-                                    mock_listener_repo_update,
-                                    mock_amphora_repo_update):
-
-        amphorae_net_config_mock = mock.Mock()
-        amphora_post_vip_plug_obj = amphora_driver_tasks.AmphoraePostVIPPlug()
-        amphora_post_vip_plug_obj.execute(_LB_mock,
-                                          amphorae_net_config_mock)
-
-        mock_driver.post_vip_plug.assert_called_once_with(
-            _amphora_mock, _LB_mock, amphorae_net_config_mock)
-
-        # Test revert
-        amp = amphora_post_vip_plug_obj.revert(None, _LB_mock)
-        repo.LoadBalancerRepository.update.assert_called_once_with(
-            _session_mock,
-            id=LB_ID,
-            provisioning_status=constants.ERROR)
-
-        self.assertIsNone(amp)
-
-        # Test revert with exception
-        repo.LoadBalancerRepository.update.reset_mock()
-        mock_loadbalancer_repo_update.side_effect = Exception('fail')
         amp = amphora_post_vip_plug_obj.revert(None, _LB_mock)
         repo.LoadBalancerRepository.update.assert_called_once_with(
             _session_mock,
@@ -519,17 +345,11 @@ class TestAmphoraDriverTasks(base.TestCase):
                                            mock_listener_repo_update,
                                            mock_amphora_repo_update):
         _LB_mock.amphorae = _amphorae_mock
-
-        timeout_dict = {constants.CONN_MAX_RETRIES: CONN_MAX_RETRIES,
-                        constants.CONN_RETRY_INTERVAL: CONN_RETRY_INTERVAL}
-
         amphora_update_vrrp_interface_obj = (
             amphora_driver_tasks.AmphoraUpdateVRRPInterface())
         amphora_update_vrrp_interface_obj.execute(_LB_mock)
-        mock_driver.get_vrrp_interface.assert_called_once_with(
-            _amphora_mock, timeout_dict=timeout_dict)
+        mock_driver.get_vrrp_interface.assert_called_once_with(_amphora_mock)
 
-        # Test revert
         mock_driver.reset_mock()
 
         _LB_mock.amphorae = _amphorae_mock
@@ -544,17 +364,6 @@ class TestAmphoraDriverTasks(base.TestCase):
         failure_obj = failure.Failure.from_exception(Exception("TESTEXCEPT"))
         amphora_update_vrrp_interface_obj.revert(failure_obj, _LB_mock)
         self.assertFalse(mock_amphora_repo_update.called)
-
-        # Test revert with exception
-        mock_driver.reset_mock()
-        mock_amphora_repo_update.reset_mock()
-        mock_amphora_repo_update.side_effect = Exception('fail')
-
-        _LB_mock.amphorae = _amphorae_mock
-        amphora_update_vrrp_interface_obj.revert("BADRESULT", _LB_mock)
-        mock_amphora_repo_update.assert_called_with(_session_mock,
-                                                    _amphora_mock.id,
-                                                    vrrp_interface=None)
 
     def test_amphora_vrrp_update(self,
                                  mock_driver,
@@ -594,22 +403,3 @@ class TestAmphoraDriverTasks(base.TestCase):
             amphora_driver_tasks.AmphoraVRRPStart())
         amphora_vrrp_start_obj.execute(_LB_mock)
         mock_driver.start_vrrp_service.assert_called_once_with(_LB_mock)
-
-    def test_amphora_compute_connectivity_wait(self,
-                                               mock_driver,
-                                               mock_generate_uuid,
-                                               mock_log,
-                                               mock_get_session,
-                                               mock_listener_repo_get,
-                                               mock_listener_repo_update,
-                                               mock_amphora_repo_update):
-        amp_compute_conn_wait_obj = (
-            amphora_driver_tasks.AmphoraComputeConnectivityWait())
-        amp_compute_conn_wait_obj.execute(_amphora_mock)
-        mock_driver.get_info.assert_called_once_with(_amphora_mock)
-
-        mock_driver.get_info.side_effect = driver_except.TimeOutException()
-        self.assertRaises(driver_except.TimeOutException,
-                          amp_compute_conn_wait_obj.execute, _amphora_mock)
-        mock_amphora_repo_update.assert_called_once_with(
-            _session_mock, AMP_ID, status=constants.ERROR)

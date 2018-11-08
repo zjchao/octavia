@@ -12,8 +12,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import logging
+
 import oslo_db.exception as oslo_exc
-from oslo_log import log as logging
 from oslo_utils import excutils
 import pecan
 from wsme import types as wtypes
@@ -26,6 +27,8 @@ from octavia.common import data_models
 from octavia.common import exceptions
 from octavia.common import validate
 from octavia.db import prepare as db_prepare
+from octavia.i18n import _LI
+
 
 LOG = logging.getLogger(__name__)
 
@@ -51,7 +54,7 @@ class L7RuleController(base.BaseController):
     def get_all(self):
         """Lists all l7rules of a l7policy."""
         context = pecan.request.context.get('octavia_context')
-        db_l7rules, _ = self.repositories.l7rule.get_all(
+        db_l7rules = self.repositories.l7rule.get_all(
             context.session, l7policy_id=self.l7policy_id)
         return self._convert_db_to_type(db_l7rules,
                                         [l7rule_types.L7RuleResponse])
@@ -62,8 +65,8 @@ class L7RuleController(base.BaseController):
                 session, self.load_balancer_id,
                 constants.PENDING_UPDATE, constants.PENDING_UPDATE,
                 listener_ids=[self.listener_id]):
-            LOG.info("L7Rule cannot be created or modified because the "
-                     "Load Balancer is in an immutable state")
+            LOG.info(_LI("L7Rule cannot be created or modified because the "
+                         "Load Balancer is in an immutable state"))
             lb_repo = self.repositories.load_balancer
             db_lb = lb_repo.get(session, id=self.load_balancer_id)
             raise exceptions.ImmutableObject(resource=db_lb._name(),
@@ -85,7 +88,6 @@ class L7RuleController(base.BaseController):
         except Exception as e:
             raise exceptions.L7RuleValidation(error=e)
         context = pecan.request.context.get('octavia_context')
-
         self._check_l7policy_max_rules(context.session)
         l7rule_dict = db_prepare.create_l7rule(
             l7rule.to_dict(render_unsets=True), self.l7policy_id)
@@ -106,7 +108,7 @@ class L7RuleController(base.BaseController):
             if ['id'] == de.columns:
                 raise exceptions.IDAlreadyExists()
         try:
-            LOG.info("Sending Creation of L7Rule %s to handler",
+            LOG.info(_LI("Sending Creation of L7Rule %s to handler"),
                      db_l7rule.id)
             self.handler.create(db_l7rule)
         except Exception:
@@ -134,11 +136,8 @@ class L7RuleController(base.BaseController):
             raise exceptions.L7RuleValidation(error=e)
         self._test_lb_and_listener_statuses(context.session)
 
-        self.repositories.l7rule.update(
-            context.session, id, provisioning_status=constants.PENDING_UPDATE)
-
         try:
-            LOG.info("Sending Update of L7Rule %s to handler", id)
+            LOG.info(_LI("Sending Update of L7Rule %s to handler"), id)
             self.handler.update(db_l7rule, l7rule)
         except Exception:
             with excutils.save_and_reraise_exception(reraise=False):
@@ -157,7 +156,7 @@ class L7RuleController(base.BaseController):
         self._test_lb_and_listener_statuses(context.session)
 
         try:
-            LOG.info("Sending Deletion of L7Rule %s to handler",
+            LOG.info(_LI("Sending Deletion of L7Rule %s to handler"),
                      db_l7rule.id)
             self.handler.delete(db_l7rule)
         except Exception:

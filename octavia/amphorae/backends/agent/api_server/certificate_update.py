@@ -17,11 +17,11 @@ import stat
 
 import flask
 from oslo_config import cfg
-import webob
 
 BUFFER = 1024
 
 CONF = cfg.CONF
+CONF.import_group('amphora_agent', 'octavia.common.config')
 
 
 def upload_server_cert():
@@ -36,4 +36,5 @@ def upload_server_cert():
             crt_file.write(b)
             b = stream.read(BUFFER)
 
-    return webob.Response(json={'message': 'OK'}, status=202)
+    return flask.make_response(flask.jsonify({
+        'message': 'OK'}), 202)

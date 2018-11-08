@@ -23,8 +23,7 @@ class TestListener(base.BaseAPITest):
 
     def setUp(self):
         super(TestListener, self).setUp()
-        self.lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()})
+        self.lb = self.create_load_balancer({})
         self.set_lb_status(self.lb.get('id'))
         self.listeners_path = self.LISTENERS_PATH.format(
             lb_id=self.lb.get('id'))
@@ -52,12 +51,6 @@ class TestListener(base.BaseAPITest):
         listener2['operating_status'] = constants.ONLINE
         listener3['provisioning_status'] = constants.ACTIVE
         listener3['operating_status'] = constants.ONLINE
-        for listener in api_listeners:
-            del listener['updated_at']
-
-        self.assertIsNone(listener1.pop('updated_at'))
-        self.assertIsNone(listener2.pop('updated_at'))
-        self.assertIsNone(listener3.pop('updated_at'))
         self.assertIn(listener1, api_listeners)
         self.assertIn(listener2, api_listeners)
         self.assertIn(listener3, api_listeners)
@@ -94,7 +87,6 @@ class TestListener(base.BaseAPITest):
                        'protocol_port': 80, 'connection_limit': 10,
                        'tls_certificate_id': uuidutils.generate_uuid(),
                        'sni_containers': [sni1, sni2],
-                       'insert_headers': {},
                        'project_id': uuidutils.generate_uuid()}
         lb_listener.update(optionals)
         response = self.post(self.listeners_path, lb_listener)
@@ -112,11 +104,6 @@ class TestListener(base.BaseAPITest):
         self.assertEqual(2, len(sni_resp))
         for sni in sni_resp:
             self.assertIn(sni, sni_ex)
-        self.assertIsNotNone(listener_api.pop('created_at'))
-        self.assertIsNone(listener_api.pop('updated_at'))
-        self.assertEqual(listener_api['project_id'],
-                         listener_api.pop('tenant_id'))
-        lb_listener['project_id'] = self.project_id
         self.assertEqual(lb_listener, listener_api)
         self.assert_correct_lb_status(self.lb.get('id'),
                                       constants.PENDING_UPDATE,
@@ -130,8 +117,7 @@ class TestListener(base.BaseAPITest):
                        'default_pool_id': self.pool.get('id'),
                        'description': 'desc1',
                        'enabled': False, 'protocol': constants.PROTOCOL_HTTP,
-                       'protocol_port': 80,
-                       'project_id': self.project_id}
+                       'protocol_port': 80}
         response = self.post(self.listeners_path, lb_listener)
         api_listener = response.json
         self.assertEqual(api_listener.get('default_pool_id'),
@@ -142,8 +128,7 @@ class TestListener(base.BaseAPITest):
                        'default_pool_id': uuidutils.generate_uuid(),
                        'description': 'desc1',
                        'enabled': False, 'protocol': constants.PROTOCOL_HTTP,
-                       'protocol_port': 80,
-                       'project_id': self.project_id}
+                       'protocol_port': 80}
         self.post(self.listeners_path, lb_listener, status=404)
 
     def test_create_with_id(self):
@@ -154,14 +139,12 @@ class TestListener(base.BaseAPITest):
                         'default_pool_id': self.pool.get('id'),
                         'description': 'desc1',
                         'enabled': False, 'protocol': constants.PROTOCOL_HTTP,
-                        'protocol_port': 80,
-                        'project_id': self.project_id}
+                        'protocol_port': 80}
         lb_listener2 = {'name': 'listener2',
                         'default_pool_id': self.pool.get('id'),
                         'description': 'desc2',
                         'enabled': False, 'protocol': constants.PROTOCOL_HTTP,
-                        'protocol_port': 81,
-                        'project_id': self.project_id}
+                        'protocol_port': 81}
         listener1 = self.post(self.listeners_path, lb_listener1).json
         self.set_lb_status(self.lb.get('id'), constants.ACTIVE)
         listener2 = self.post(self.listeners_path, lb_listener2).json
@@ -186,10 +169,9 @@ class TestListener(base.BaseAPITest):
         defaults = {'name': None, 'default_pool_id': None,
                     'description': None, 'enabled': True,
                     'connection_limit': None, 'tls_certificate_id': None,
-                    'sni_containers': [], 'insert_headers': {}}
+                    'sni_containers': [], 'project_id': None}
         lb_listener = {'protocol': constants.PROTOCOL_HTTP,
-                       'protocol_port': 80,
-                       'project_id': self.project_id}
+                       'protocol_port': 80}
         response = self.post(self.listeners_path, lb_listener)
         listener_api = response.json
         extra_expects = {'provisioning_status': constants.PENDING_CREATE,
@@ -198,10 +180,6 @@ class TestListener(base.BaseAPITest):
         lb_listener.update(defaults)
         self.assertTrue(uuidutils.is_uuid_like(listener_api.get('id')))
         lb_listener['id'] = listener_api.get('id')
-        self.assertIsNotNone(listener_api.pop('created_at'))
-        self.assertIsNone(listener_api.pop('updated_at'))
-        self.assertEqual(listener_api['project_id'],
-                         listener_api.pop('tenant_id'))
         self.assertEqual(lb_listener, listener_api)
         self.assert_correct_lb_status(self.lb.get('id'),
                                       constants.PENDING_UPDATE,
@@ -209,14 +187,6 @@ class TestListener(base.BaseAPITest):
         self.assert_final_lb_statuses(self.lb.get('id'))
         self.assert_final_listener_statuses(self.lb.get('id'),
                                             listener_api.get('id'))
-
-    def test_create_over_quota(self):
-        lb_listener = {'protocol': constants.PROTOCOL_HTTP,
-                       'protocol_port': 80,
-                       'project_id': self.project_id}
-        self.check_quota_met_true_mock.start()
-        self.addCleanup(self.check_quota_met_true_mock.stop)
-        self.post(self.listeners_path, lb_listener, status=403)
 
     def test_update(self):
         tls_uuid = uuidutils.generate_uuid()
@@ -237,10 +207,6 @@ class TestListener(base.BaseAPITest):
                          'provisioning_status': constants.PENDING_UPDATE,
                          'operating_status': constants.ONLINE}
         listener.update(update_expect)
-        self.assertEqual(listener.pop('created_at'),
-                         api_listener.pop('created_at'))
-        self.assertNotEqual(listener.pop('updated_at'),
-                            api_listener.pop('updated_at'))
         self.assertNotEqual(listener, api_listener)
         self.assert_correct_lb_status(self.lb.get('id'),
                                       constants.PENDING_UPDATE,
@@ -277,8 +243,7 @@ class TestListener(base.BaseAPITest):
                                          constants.PROTOCOL_TCP, 80)
         self.set_lb_status(self.lb.get('id'))
         listener2_post = {'protocol': listener1.get('protocol'),
-                          'protocol_port': listener1.get('protocol_port'),
-                          'project_id': self.project_id}
+                          'protocol_port': listener1.get('protocol_port')}
         self.post(self.listeners_path, listener2_post, status=409)
 
     def test_update_listeners_same_port(self):
@@ -310,9 +275,6 @@ class TestListener(base.BaseAPITest):
                     'provisioning_status': constants.PENDING_DELETE,
                     'connection_limit': None}
         listener.update(expected)
-
-        self.assertIsNone(listener.pop('updated_at'))
-        self.assertIsNotNone(api_listener.pop('updated_at'))
         self.assertEqual(listener, api_listener)
         self.assert_correct_lb_status(self.lb.get('id'),
                                       constants.PENDING_UPDATE,
@@ -344,25 +306,21 @@ class TestListener(base.BaseAPITest):
         self.put(listener_path, new_listener, status=400)
 
     def test_update_pending_create(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', description='desc1', enabled=False)
+        lb = self.create_load_balancer({}, name='lb1', description='desc1',
+                                       enabled=False)
         lb_listener = {'name': 'listener1', 'description': 'desc1',
                        'enabled': False, 'protocol': constants.PROTOCOL_HTTP,
-                       'protocol_port': 80, 'connection_limit': 10,
-                       'project_id': self.project_id}
+                       'protocol_port': 80, 'connection_limit': 10}
         self.post(self.LISTENERS_PATH.format(lb_id=lb.get('id')),
                   lb_listener, status=409)
 
     def test_delete_pending_update(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', description='desc1', enabled=False)
+        lb = self.create_load_balancer({}, name='lb1', description='desc1',
+                                       enabled=False)
         self.set_lb_status(lb.get('id'))
         lb_listener = {'name': 'listener1', 'description': 'desc1',
                        'enabled': False, 'protocol': constants.PROTOCOL_HTTP,
-                       'protocol_port': 80, 'connection_limit': 10,
-                       'project_id': self.project_id}
+                       'protocol_port': 80, 'connection_limit': 10}
         api_listener = self.post(
             self.LISTENERS_PATH.format(lb_id=lb.get('id')), lb_listener).json
         self.delete(self.LISTENER_PATH.format(
@@ -370,14 +328,12 @@ class TestListener(base.BaseAPITest):
             status=409)
 
     def test_update_pending_update(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', description='desc1', enabled=False)
+        lb = self.create_load_balancer({}, name='lb1', description='desc1',
+                                       enabled=False)
         self.set_lb_status(lb.get('id'))
         lb_listener = {'name': 'listener1', 'description': 'desc1',
                        'enabled': False, 'protocol': constants.PROTOCOL_HTTP,
-                       'protocol_port': 80, 'connection_limit': 10,
-                       'project_id': self.project_id}
+                       'protocol_port': 80, 'connection_limit': 10}
         api_listener = self.post(
             self.LISTENERS_PATH.format(lb_id=lb.get('id')), lb_listener).json
         self.set_lb_status(lb.get('id'))
@@ -387,35 +343,31 @@ class TestListener(base.BaseAPITest):
             {}, status=409)
 
     def test_update_pending_delete(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', description='desc1', enabled=False)
+        lb = self.create_load_balancer({}, name='lb1', description='desc1',
+                                       enabled=False)
         self.set_lb_status(lb.get('id'))
         lb_listener = {'name': 'listener1', 'description': 'desc1',
                        'enabled': False, 'protocol': constants.PROTOCOL_HTTP,
-                       'protocol_port': 80, 'connection_limit': 10,
-                       'project_id': self.project_id}
+                       'protocol_port': 80, 'connection_limit': 10}
         api_listener = self.post(
             self.LISTENERS_PATH.format(lb_id=lb.get('id')), lb_listener).json
         self.set_lb_status(lb.get('id'))
-        self.delete(self.LB_DELETE_CASCADE_PATH.format(lb_id=lb.get('id')))
+        self.delete(self.LB_PATH.format(lb_id=lb.get('id')))
         self.put(self.LISTENER_PATH.format(
             lb_id=lb.get('id'), listener_id=api_listener.get('id')),
             {}, status=409)
 
     def test_delete_pending_delete(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', description='desc1', enabled=False)
+        lb = self.create_load_balancer({}, name='lb1', description='desc1',
+                                       enabled=False)
         self.set_lb_status(lb.get('id'))
         lb_listener = {'name': 'listener1', 'description': 'desc1',
                        'enabled': False, 'protocol': constants.PROTOCOL_HTTP,
-                       'protocol_port': 80, 'connection_limit': 10,
-                       'project_id': self.project_id}
+                       'protocol_port': 80, 'connection_limit': 10}
         api_listener = self.post(
             self.LISTENERS_PATH.format(lb_id=lb.get('id')), lb_listener).json
         self.set_lb_status(lb.get('id'))
-        self.delete(self.LB_DELETE_CASCADE_PATH.format(lb_id=lb.get('id')))
+        self.delete(self.LB_PATH.format(lb_id=lb.get('id')))
         self.delete(self.LISTENER_PATH.format(
             lb_id=lb.get('id'), listener_id=api_listener.get('id')),
             status=409)
@@ -443,18 +395,3 @@ class TestListener(base.BaseAPITest):
         self.assertIsNone(listener.get('tls_termination'))
         get_listener = self.get(listener_path).json
         self.assertIsNone(get_listener.get('tls_termination'))
-
-    def test_create_with_valid_insert_headers(self):
-        lb_listener = {'protocol': 'HTTP',
-                       'protocol_port': 80,
-                       'insert_headers': {'X-Forwarded-For': 'true'},
-                       'project_id': self.project_id}
-        self.post(self.listeners_path, lb_listener, status=202)
-
-    def test_create_with_bad_insert_headers(self):
-        lb_listener = {'protocol': 'HTTP',
-                       'protocol_port': 80,
-                       # 'insert_headers': {'x': 'x'}}
-                       'insert_headers': {'X-Forwarded-Four': 'true'},
-                       'project_id': self.project_id}
-        self.post(self.listeners_path, lb_listener, status=400)

@@ -26,6 +26,7 @@ KEEPALIVED_TEMPLATE = os.path.abspath(
     os.path.join(os.path.dirname(__file__),
                  'templates/keepalived_base.template'))
 CONF = cfg.CONF
+CONF.import_group('keepalived_vrrp', 'octavia.common.config')
 
 
 class KeepalivedJinjaTemplater(object):
@@ -47,7 +48,6 @@ class KeepalivedJinjaTemplater(object):
             template_loader = jinja2.FileSystemLoader(
                 searchpath=os.path.dirname(template_file))
             self._jinja_env = jinja2.Environment(
-                autoescape=True,
                 loader=template_loader,
                 trim_blocks=True,
                 lstrip_blocks=True)

@@ -17,25 +17,26 @@ import mock
 from oslo_config import cfg
 from oslo_config import fixture as oslo_fixture
 from oslo_utils import uuidutils
+import six.moves.builtins as builtins
+
 
 from octavia.common import constants
 from octavia.common import exceptions
 from octavia.controller.worker.tasks import compute_tasks
-from octavia.tests.common import utils as test_utils
 import octavia.tests.unit.base as base
 
-
-AMP_FLAVOR_ID = '10'
-AMP_IMAGE_ID = '11'
+AMP_FLAVOR_ID = 10
+AMP_IMAGE_ID = 11
 AMP_IMAGE_TAG = 'glance_tag'
 AMP_SSH_KEY_NAME = None
-AMP_NET = [uuidutils.generate_uuid()]
+AMP_NET = uuidutils.generate_uuid()
 AMP_SEC_GROUPS = []
 AMP_WAIT = 12
 AMPHORA_ID = uuidutils.generate_uuid()
 COMPUTE_ID = uuidutils.generate_uuid()
 LB_NET_IP = '192.0.2.1'
 PORT_ID = uuidutils.generate_uuid()
+AUTH_VERSION = '2'
 SERVER_GRPOUP_ID = uuidutils.generate_uuid()
 
 
@@ -59,22 +60,15 @@ _port.id = PORT_ID
 class TestComputeTasks(base.TestCase):
 
     def setUp(self):
-        self.conf = self.useFixture(oslo_fixture.Config(cfg.CONF))
-        self.conf.config(
-            group="controller_worker", amp_flavor_id=AMP_FLAVOR_ID)
-        self.conf.config(
-            group="controller_worker", amp_image_id=AMP_IMAGE_ID)
-        self.conf.config(
-            group="controller_worker", amp_image_tag=AMP_IMAGE_TAG)
-        self.conf.config(
-            group="controller_worker", amp_ssh_key_name=AMP_SSH_KEY_NAME)
-        self.conf.config(
-            group="controller_worker", amp_boot_network_list=AMP_NET)
-        self.conf.config(
-            group="controller_worker", amp_active_wait_sec=AMP_WAIT)
-        self.conf.config(
-            group="controller_worker", amp_secgroup_list=AMP_SEC_GROUPS)
-        self.conf.config(group="controller_worker", amp_image_owner_id='')
+        conf = oslo_fixture.Config(cfg.CONF)
+        conf.config(group="controller_worker", amp_flavor_id=AMP_FLAVOR_ID)
+        conf.config(group="controller_worker", amp_image_id=AMP_IMAGE_ID)
+        conf.config(group="controller_worker", amp_image_tag=AMP_IMAGE_TAG)
+        conf.config(group="controller_worker",
+                    amp_ssh_key_name=AMP_SSH_KEY_NAME)
+        conf.config(group="controller_worker", amp_network=AMP_NET)
+        conf.config(group="controller_worker", amp_active_wait_sec=AMP_WAIT)
+        conf.config(group="keystone_authtoken", auth_version=AUTH_VERSION)
 
         _amphora_mock.id = AMPHORA_ID
         _amphora_mock.status = constants.AMPHORA_ALLOCATED
@@ -91,10 +85,6 @@ class TestComputeTasks(base.TestCase):
     @mock.patch('stevedore.driver.DriverManager.driver')
     def test_compute_create(self, mock_driver, mock_conf, mock_jinja):
 
-        image_owner_id = uuidutils.generate_uuid()
-        self.conf.config(
-            group="controller_worker", amp_image_owner_id=image_owner_id)
-
         createcompute = compute_tasks.ComputeCreate()
 
         mock_driver.build.return_value = COMPUTE_ID
@@ -108,10 +98,9 @@ class TestComputeTasks(base.TestCase):
             amphora_flavor=AMP_FLAVOR_ID,
             image_id=AMP_IMAGE_ID,
             image_tag=AMP_IMAGE_TAG,
-            image_owner=image_owner_id,
             key_name=AMP_SSH_KEY_NAME,
             sec_groups=AMP_SEC_GROUPS,
-            network_ids=AMP_NET,
+            network_ids=[AMP_NET],
             port_ids=[PORT_ID],
             config_drive_files={'/etc/octavia/'
                                 'amphora-agent.conf': 'test_conf'},
@@ -119,7 +108,7 @@ class TestComputeTasks(base.TestCase):
             server_group_id=SERVER_GRPOUP_ID)
 
         # Make sure it returns the expected compute_id
-        self.assertEqual(COMPUTE_ID, compute_id)
+        assert(compute_id == COMPUTE_ID)
 
         # Test that a build exception is raised
         createcompute = compute_tasks.ComputeCreate()
@@ -154,8 +143,8 @@ class TestComputeTasks(base.TestCase):
     def test_compute_create_user_data(self, mock_driver,
                                       mock_ud_conf, mock_conf, mock_jinja):
 
-        self.conf.config(
-            group="controller_worker", user_data_config_drive=True)
+        conf = oslo_fixture.Config(cfg.CONF)
+        conf.config(group="controller_worker", user_data_config_drive=True)
         mock_ud_conf.return_value = 'test_ud_conf'
         createcompute = compute_tasks.ComputeCreate()
 
@@ -169,14 +158,73 @@ class TestComputeTasks(base.TestCase):
             amphora_flavor=AMP_FLAVOR_ID,
             image_id=AMP_IMAGE_ID,
             image_tag=AMP_IMAGE_TAG,
-            image_owner='',
             key_name=AMP_SSH_KEY_NAME,
             sec_groups=AMP_SEC_GROUPS,
-            network_ids=AMP_NET,
+            network_ids=[AMP_NET],
             port_ids=[PORT_ID],
             config_drive_files=None,
             user_data='test_ud_conf',
             server_group_id=None)
+
+        # Make sure it returns the expected compute_id
+        assert(compute_id == COMPUTE_ID)
+
+        # Test that a build exception is raised
+        createcompute = compute_tasks.ComputeCreate()
+
+        self.assertRaises(TypeError,
+                          createcompute.execute,
+                          _amphora_mock, config_drive_files='test_cert')
+
+        # Test revert()
+
+        _amphora_mock.compute_id = COMPUTE_ID
+
+        createcompute = compute_tasks.ComputeCreate()
+        createcompute.revert(compute_id, _amphora_mock.id)
+
+        # Validate that the delete method was called properly
+        mock_driver.delete.assert_called_once_with(
+            COMPUTE_ID)
+
+        # Test that a delete exception is not raised
+
+        createcompute.revert(COMPUTE_ID, _amphora_mock.id)
+        conf = oslo_fixture.Config(cfg.CONF)
+        conf.config(group="controller_worker", user_data_config_drive=False)
+
+    @mock.patch('jinja2.Environment.get_template')
+    @mock.patch('octavia.amphorae.backends.agent.'
+                'agent_jinja_cfg.AgentJinjaTemplater.'
+                'build_agent_config', return_value='test_conf')
+    @mock.patch('stevedore.driver.DriverManager.driver')
+    def test_compute_create_without_ssh_access(self, mock_driver,
+                                               mock_conf, mock_jinja):
+
+        createcompute = compute_tasks.ComputeCreate()
+
+        mock_driver.build.return_value = COMPUTE_ID
+        conf = oslo_fixture.Config(cfg.CONF)
+        conf.config(group="controller_worker", amp_ssh_access_allowed=False)
+
+        # Test execute()
+        compute_id = createcompute.execute(_amphora_mock.id, ports=[_port],
+                                           server_group_id=SERVER_GRPOUP_ID)
+
+        # Validate that the build method was called properly
+        mock_driver.build.assert_called_once_with(
+            name="amphora-" + _amphora_mock.id,
+            amphora_flavor=AMP_FLAVOR_ID,
+            image_id=AMP_IMAGE_ID,
+            image_tag=AMP_IMAGE_TAG,
+            key_name=None,
+            sec_groups=AMP_SEC_GROUPS,
+            network_ids=[AMP_NET],
+            port_ids=[PORT_ID],
+            config_drive_files={'/etc/octavia/'
+                                'amphora-agent.conf': 'test_conf'},
+            user_data=None,
+            server_group_id=SERVER_GRPOUP_ID)
 
         # Make sure it returns the expected compute_id
         self.assertEqual(COMPUTE_ID, compute_id)
@@ -208,45 +256,45 @@ class TestComputeTasks(base.TestCase):
                 'agent_jinja_cfg.AgentJinjaTemplater.'
                 'build_agent_config', return_value='test_conf')
     @mock.patch('stevedore.driver.DriverManager.driver')
-    def test_compute_create_without_ssh_access(self, mock_driver,
-                                               mock_conf, mock_jinja):
+    def test_compute_create_cert(self, mock_driver, mock_conf, mock_jinja):
 
-        createcompute = compute_tasks.ComputeCreate()
+        createcompute = compute_tasks.CertComputeCreate()
 
         mock_driver.build.return_value = COMPUTE_ID
-        self.conf.config(
-            group="controller_worker", amp_ssh_access_allowed=False)
-        self.conf.config(
-            group="controller_worker", user_data_config_drive=False)
+        m = mock.mock_open(read_data='test')
+        with mock.patch.object(builtins, 'open', m, create=True):
+            # Test execute()
+            compute_id = createcompute.execute(_amphora_mock.id, 'test_cert',
+                                               server_group_id=SERVER_GRPOUP_ID
+                                               )
 
-        # Test execute()
-        compute_id = createcompute.execute(_amphora_mock.id, ports=[_port],
-                                           server_group_id=SERVER_GRPOUP_ID)
+            # Validate that the build method was called properly
+            mock_driver.build.assert_called_once_with(
+                name="amphora-" + _amphora_mock.id,
+                amphora_flavor=AMP_FLAVOR_ID,
+                image_id=AMP_IMAGE_ID,
+                image_tag=AMP_IMAGE_TAG,
+                key_name=AMP_SSH_KEY_NAME,
+                sec_groups=AMP_SEC_GROUPS,
+                network_ids=[AMP_NET],
+                port_ids=[],
+                user_data=None,
+                config_drive_files={
+                    '/etc/octavia/certs/server.pem': 'test_cert',
+                    '/etc/octavia/certs/client_ca.pem': 'test',
+                    '/etc/octavia/amphora-agent.conf': 'test_conf'},
+                server_group_id=SERVER_GRPOUP_ID)
 
-        # Validate that the build method was called properly
-        mock_driver.build.assert_called_once_with(
-            name="amphora-" + _amphora_mock.id,
-            amphora_flavor=AMP_FLAVOR_ID,
-            image_id=AMP_IMAGE_ID,
-            image_tag=AMP_IMAGE_TAG,
-            image_owner='',
-            key_name=None,
-            sec_groups=AMP_SEC_GROUPS,
-            network_ids=AMP_NET,
-            port_ids=[PORT_ID],
-            config_drive_files={'/etc/octavia/'
-                                'amphora-agent.conf': 'test_conf'},
-            user_data=None,
-            server_group_id=SERVER_GRPOUP_ID)
-
-        self.assertEqual(COMPUTE_ID, compute_id)
+        # Make sure it returns the expected compute_id
+        assert(compute_id == COMPUTE_ID)
 
         # Test that a build exception is raised
-        createcompute = compute_tasks.ComputeCreate()
-
-        self.assertRaises(TypeError,
-                          createcompute.execute,
-                          _amphora_mock, config_drive_files='test_cert')
+        with mock.patch.object(builtins, 'open', m, create=True):
+            createcompute = compute_tasks.ComputeCreate()
+            self.assertRaises(TypeError,
+                              createcompute.execute,
+                              _amphora_mock,
+                              config_drive_files='test_cert')
 
         # Test revert()
 
@@ -263,84 +311,20 @@ class TestComputeTasks(base.TestCase):
 
         createcompute.revert(COMPUTE_ID, _amphora_mock.id)
 
-    @mock.patch('jinja2.Environment.get_template')
-    @mock.patch('octavia.amphorae.backends.agent.'
-                'agent_jinja_cfg.AgentJinjaTemplater.'
-                'build_agent_config', return_value='test_conf')
-    @mock.patch('stevedore.driver.DriverManager.driver')
-    def test_compute_create_cert(self, mock_driver, mock_conf, mock_jinja):
-        createcompute = compute_tasks.CertComputeCreate()
-
-        mock_driver.build.return_value = COMPUTE_ID
-        path = '/etc/octavia/certs/ca_01.pem'
-        self.useFixture(test_utils.OpenFixture(path, 'test'))
-
-        # Test execute()
-        compute_id = createcompute.execute(_amphora_mock.id, 'test_cert',
-                                           server_group_id=SERVER_GRPOUP_ID
-                                           )
-
-        # Validate that the build method was called properly
-        mock_driver.build.assert_called_once_with(
-            name="amphora-" + _amphora_mock.id,
-            amphora_flavor=AMP_FLAVOR_ID,
-            image_id=AMP_IMAGE_ID,
-            image_tag=AMP_IMAGE_TAG,
-            image_owner='',
-            key_name=AMP_SSH_KEY_NAME,
-            sec_groups=AMP_SEC_GROUPS,
-            network_ids=AMP_NET,
-            port_ids=[],
-            user_data=None,
-            config_drive_files={
-                '/etc/octavia/certs/server.pem': 'test_cert',
-                '/etc/octavia/certs/client_ca.pem': 'test',
-                '/etc/octavia/amphora-agent.conf': 'test_conf'},
-            server_group_id=SERVER_GRPOUP_ID)
-
-        self.assertEqual(COMPUTE_ID, compute_id)
-
-        # Test that a build exception is raised
-        self.useFixture(test_utils.OpenFixture(path, 'test'))
-
-        createcompute = compute_tasks.ComputeCreate()
-        self.assertRaises(TypeError,
-                          createcompute.execute,
-                          _amphora_mock,
-                          config_drive_files='test_cert')
-
-        # Test revert()
-
-        _amphora_mock.compute_id = COMPUTE_ID
-
-        createcompute = compute_tasks.ComputeCreate()
-        createcompute.revert(compute_id, _amphora_mock.id)
-
-        # Validate that the delete method was called properly
-        mock_driver.delete.assert_called_once_with(COMPUTE_ID)
-
-        # Test that a delete exception is not raised
-
-        createcompute.revert(COMPUTE_ID, _amphora_mock.id)
-
-    @mock.patch('octavia.controller.worker.amphora_rate_limit'
-                '.AmphoraBuildRateLimit.remove_from_build_req_queue')
     @mock.patch('stevedore.driver.DriverManager.driver')
     @mock.patch('time.sleep')
     def test_compute_wait(self,
                           mock_time_sleep,
-                          mock_driver,
-                          mock_remove_from_build_queue):
+                          mock_driver):
 
-        self.conf.config(group='haproxy_amphora', build_rate_limit=5)
         _amphora_mock.compute_id = COMPUTE_ID
         _amphora_mock.status = constants.ACTIVE
         _amphora_mock.lb_network_ip = LB_NET_IP
 
-        mock_driver.get_amphora.return_value = _amphora_mock, None
+        mock_driver.get_amphora.return_value = _amphora_mock
 
-        computewait = compute_tasks.ComputeActiveWait()
-        computewait.execute(COMPUTE_ID, AMPHORA_ID)
+        computewait = compute_tasks.ComputeWait()
+        computewait.execute(COMPUTE_ID)
 
         mock_driver.get_amphora.assert_called_once_with(COMPUTE_ID)
 
@@ -348,26 +332,20 @@ class TestComputeTasks(base.TestCase):
 
         self.assertRaises(exceptions.ComputeWaitTimeoutException,
                           computewait.execute,
-                          _amphora_mock, AMPHORA_ID)
+                          _amphora_mock)
 
-    @mock.patch('octavia.controller.worker.amphora_rate_limit'
-                '.AmphoraBuildRateLimit.remove_from_build_req_queue')
     @mock.patch('stevedore.driver.DriverManager.driver')
     @mock.patch('time.sleep')
-    def test_compute_wait_error_status(self,
-                                       mock_time_sleep,
-                                       mock_driver,
-                                       mock_remove_from_build_queue):
+    def test_compute_wait_error_status(self, mock_time_sleep, mock_driver):
 
-        self.conf.config(group='haproxy_amphora', build_rate_limit=5)
         _amphora_mock.compute_id = COMPUTE_ID
         _amphora_mock.status = constants.ACTIVE
         _amphora_mock.lb_network_ip = LB_NET_IP
 
-        mock_driver.get_amphora.return_value = _amphora_mock, None
+        mock_driver.get_amphora.return_value = _amphora_mock
 
-        computewait = compute_tasks.ComputeActiveWait()
-        computewait.execute(COMPUTE_ID, AMPHORA_ID)
+        computewait = compute_tasks.ComputeWait()
+        computewait.execute(COMPUTE_ID)
 
         mock_driver.get_amphora.assert_called_once_with(COMPUTE_ID)
 
@@ -375,27 +353,7 @@ class TestComputeTasks(base.TestCase):
 
         self.assertRaises(exceptions.ComputeBuildException,
                           computewait.execute,
-                          _amphora_mock, AMPHORA_ID)
-
-    @mock.patch('octavia.controller.worker.amphora_rate_limit'
-                '.AmphoraBuildRateLimit.remove_from_build_req_queue')
-    @mock.patch('stevedore.driver.DriverManager.driver')
-    @mock.patch('time.sleep')
-    def test_compute_wait_skipped(self,
-                                  mock_time_sleep,
-                                  mock_driver,
-                                  mock_remove_from_build_queue):
-        _amphora_mock.compute_id = COMPUTE_ID
-        _amphora_mock.status = constants.ACTIVE
-        _amphora_mock.lb_network_ip = LB_NET_IP
-
-        mock_driver.get_amphora.return_value = _amphora_mock, None
-
-        computewait = compute_tasks.ComputeActiveWait()
-        computewait.execute(COMPUTE_ID, AMPHORA_ID)
-
-        mock_driver.get_amphora.assert_called_once_with(COMPUTE_ID)
-        mock_remove_from_build_queue.assert_not_called()
+                          _amphora_mock)
 
     @mock.patch('stevedore.driver.DriverManager.driver')
     def test_delete_amphorae_on_load_balancer(self, mock_driver):
@@ -431,7 +389,7 @@ class TestComputeTasks(base.TestCase):
             'octavia-lb-123', 'anti-affinity')
 
         # Make sure it returns the expected server group_id
-        self.assertEqual(server_group_test_id, sg_id)
+        assert(sg_id == server_group_test_id)
 
         # Test revert()
         nova_sever_group_obj.revert(sg_id)

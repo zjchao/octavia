@@ -19,15 +19,21 @@ Create Date: 2015-07-01 14:27:44.187179
 
 """
 
-from alembic import op
-import sqlalchemy as sa
-
 # revision identifiers, used by Alembic.
 revision = '4fe8240425b4'
 down_revision = '48660b6643f0'
+
+from alembic import op
+import sqlalchemy as sa
 
 
 def upgrade():
     with op.batch_alter_table(u'vip') as batch_op:
         batch_op.alter_column(u'network_id', new_column_name=u'subnet_id',
+                              existing_type=sa.String(36))
+
+
+def downgrade():
+    with op.batch_alter_table(u'vip') as batch_op:
+        batch_op.alter_column(u'subnet_id', new_column_name=u'network_id',
                               existing_type=sa.String(36))

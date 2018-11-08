@@ -12,11 +12,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import six
-
 from oslo_utils import excutils
-
-from octavia.i18n import _
 
 
 class AmphoraDriverError(Exception):
@@ -35,7 +31,8 @@ class AmphoraDriverError(Exception):
                     super(AmphoraDriverError, self).__init__(self.message)
 
     def __unicode__(self):
-        return six.text_type(self.msg)
+
+        return unicode(self.msg)
 
     @staticmethod
     def use_fatal_exceptions():
@@ -71,6 +68,11 @@ class StatisticsException(AmphoraDriverError):
 class TimeOutException(AmphoraDriverError):
 
     message = _('contacting the amphora timed out')
+
+
+class UnavailableException(AmphoraDriverError):
+
+    message = _('the amphora is temporary unavailable')
 
 
 class DeleteFailed(AmphoraDriverError):

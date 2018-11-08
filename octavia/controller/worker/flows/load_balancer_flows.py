@@ -27,10 +27,14 @@ from octavia.controller.worker.flows import pool_flows
 from octavia.controller.worker.tasks import amphora_driver_tasks
 from octavia.controller.worker.tasks import compute_tasks
 from octavia.controller.worker.tasks import database_tasks
-from octavia.controller.worker.tasks import lifecycle_tasks
+from octavia.controller.worker.tasks import model_tasks
 from octavia.controller.worker.tasks import network_tasks
+from octavia.i18n import _LE
+
 
 CONF = cfg.CONF
+CONF.import_group('controller_worker', 'octavia.common.config')
+CONF.import_group('nova', 'octavia.common.config')
 LOG = logging.getLogger(__name__)
 
 
@@ -42,116 +46,104 @@ class LoadBalancerFlows(object):
         self.pool_flows = pool_flows.PoolFlows()
         self.member_flows = member_flows.MemberFlows()
 
-    def get_create_load_balancer_flow(self, topology, listeners=None):
+    def get_create_load_balancer_flow(self, topology):
         """Creates a conditional graph flow that allocates a loadbalancer to
 
         two spare amphorae.
         :raises InvalidTopology: Invalid topology specified
         :return: The graph flow for creating a loadbalancer.
         """
-        f_name = constants.CREATE_LOADBALANCER_FLOW
-        lb_create_flow = linear_flow.Flow(f_name)
+        # create a linear flow as a wrapper
+        lf_name = constants.PRE_CREATE_LOADBALANCER_FLOW
+        create_lb_flow_wrapper = linear_flow.Flow(lf_name)
 
-        lb_create_flow.add(lifecycle_tasks.LoadBalancerIDToErrorOnRevertTask(
-            requires=constants.LOADBALANCER_ID))
+        f_name = constants.CREATE_LOADBALANCER_FLOW
+        lb_create_flow = unordered_flow.Flow(f_name)
 
         if topology == constants.TOPOLOGY_ACTIVE_STANDBY:
-            lb_create_flow.add(*self._create_active_standby_topology())
+            # When we boot up amphora for an active/standby topology,
+            # we should leverage the Nova anti-affinity capabilities
+            # to place the amphora on different hosts, also we need to check
+            # if anti-affinity-flag is enabled or not:
+            anti_affinity = CONF.nova.enable_anti_affinity
+            if anti_affinity:
+                # we need to create a server group first
+                create_lb_flow_wrapper.add(
+                    compute_tasks.NovaServerGroupCreate(
+                        name=lf_name + '-' +
+                        constants.CREATE_SERVER_GROUP_FLOW,
+                        requires=(constants.LOADBALANCER_ID),
+                        provides=constants.SERVER_GROUP_ID))
+
+                # update server group id in lb table
+                create_lb_flow_wrapper.add(
+                    database_tasks.UpdateLBServerGroupInDB(
+                        name=lf_name + '-' +
+                        constants.UPDATE_LB_SERVERGROUPID_FLOW,
+                        requires=(constants.LOADBALANCER_ID,
+                                  constants.SERVER_GROUP_ID)))
+
+            master_amp_sf = self.amp_flows.get_amphora_for_lb_subflow(
+                prefix=constants.ROLE_MASTER, role=constants.ROLE_MASTER)
+
+            backup_amp_sf = self.amp_flows.get_amphora_for_lb_subflow(
+                prefix=constants.ROLE_BACKUP, role=constants.ROLE_BACKUP)
+
+            lb_create_flow.add(master_amp_sf, backup_amp_sf)
+
         elif topology == constants.TOPOLOGY_SINGLE:
-            lb_create_flow.add(*self._create_single_topology())
+            amphora_sf = self.amp_flows.get_amphora_for_lb_subflow(
+                prefix=constants.ROLE_STANDALONE,
+                role=constants.ROLE_STANDALONE)
+            lb_create_flow.add(amphora_sf)
         else:
-            LOG.error("Unknown topology: %s.  Unable to build load balancer.",
-                      topology)
+            LOG.error(_LE("Unknown topology: %s.  Unable to build load "
+                          "balancer."), topology)
             raise exceptions.InvalidTopology(topology=topology)
 
-        post_amp_prefix = constants.POST_LB_AMP_ASSOCIATION_SUBFLOW
-        lb_create_flow.add(
-            self.get_post_lb_amp_association_flow(
-                post_amp_prefix, topology, mark_active=(not listeners)))
+        create_lb_flow_wrapper.add(lb_create_flow)
+        return create_lb_flow_wrapper
 
-        if listeners:
-            lb_create_flow.add(*self._create_listeners_flow())
-
-        return lb_create_flow
-
-    def _create_single_topology(self):
-        return (self.amp_flows.get_amphora_for_lb_subflow(
-            prefix=constants.ROLE_STANDALONE,
-            role=constants.ROLE_STANDALONE), )
-
-    def _create_active_standby_topology(
-            self, lf_name=constants.CREATE_LOADBALANCER_FLOW):
-        # When we boot up amphora for an active/standby topology,
-        # we should leverage the Nova anti-affinity capabilities
-        # to place the amphora on different hosts, also we need to check
-        # if anti-affinity-flag is enabled or not:
-        anti_affinity = CONF.nova.enable_anti_affinity
-        flows = []
-        if anti_affinity:
-            # we need to create a server group first
-            flows.append(
-                compute_tasks.NovaServerGroupCreate(
-                    name=lf_name + '-' +
-                    constants.CREATE_SERVER_GROUP_FLOW,
-                    requires=(constants.LOADBALANCER_ID),
-                    provides=constants.SERVER_GROUP_ID))
-
-            # update server group id in lb table
-            flows.append(
-                database_tasks.UpdateLBServerGroupInDB(
-                    name=lf_name + '-' +
-                    constants.UPDATE_LB_SERVERGROUPID_FLOW,
-                    requires=(constants.LOADBALANCER_ID,
-                              constants.SERVER_GROUP_ID)))
-
-        f_name = constants.CREATE_LOADBALANCER_FLOW
-        amps_flow = unordered_flow.Flow(f_name)
-        master_amp_sf = self.amp_flows.get_amphora_for_lb_subflow(
-            prefix=constants.ROLE_MASTER, role=constants.ROLE_MASTER)
-
-        backup_amp_sf = self.amp_flows.get_amphora_for_lb_subflow(
-            prefix=constants.ROLE_BACKUP, role=constants.ROLE_BACKUP)
-        amps_flow.add(master_amp_sf, backup_amp_sf)
-
-        return flows + [amps_flow]
-
-    def _create_listeners_flow(self):
-        flows = []
-        flows.append(
+    def get_create_load_balancer_graph_flows(self, topology, prefix):
+        allocate_amphorae_flow = self.get_create_load_balancer_flow(topology)
+        f_name = constants.CREATE_LOADBALANCER_GRAPH_FLOW
+        lb_create_graph_flow = linear_flow.Flow(f_name)
+        lb_create_graph_flow.add(
+            self.get_post_lb_amp_association_flow(prefix, topology)
+        )
+        lb_create_graph_flow.add(
             database_tasks.ReloadLoadBalancer(
                 name=constants.RELOAD_LB_AFTER_AMP_ASSOC_FULL_GRAPH,
                 requires=constants.LOADBALANCER_ID,
                 provides=constants.LOADBALANCER
             )
         )
-        flows.append(
+        lb_create_graph_flow.add(
             network_tasks.CalculateDelta(
                 requires=constants.LOADBALANCER, provides=constants.DELTAS
             )
         )
-        flows.append(
+        lb_create_graph_flow.add(
             network_tasks.HandleNetworkDeltas(
                 requires=constants.DELTAS, provides=constants.ADDED_PORTS
             )
         )
-        flows.append(
+        lb_create_graph_flow.add(
             amphora_driver_tasks.AmphoraePostNetworkPlug(
                 requires=(constants.LOADBALANCER, constants.ADDED_PORTS)
             )
         )
-        flows.append(
+        lb_create_graph_flow.add(
             self.listener_flows.get_create_all_listeners_flow()
         )
-        flows.append(
-            database_tasks.MarkLBActiveInDB(
-                mark_subobjects=True,
-                requires=constants.LOADBALANCER
-            )
-        )
-        return flows
 
-    def get_post_lb_amp_association_flow(self, prefix, topology,
-                                         mark_active=True):
+        lb_create_graph_flow.add(database_tasks.MarkLBActiveInDB(
+            mark_listeners=True,
+            requires=constants.LOADBALANCER)
+        )
+        return allocate_amphorae_flow, lb_create_graph_flow
+
+    def get_post_lb_amp_association_flow(self, prefix, topology):
         """Reload the loadbalancer and create networking subflows for
 
         created/allocated amphorae.
@@ -181,10 +173,9 @@ class LoadBalancerFlows(object):
 
         post_create_LB_flow.add(database_tasks.UpdateLoadbalancerInDB(
             requires=[constants.LOADBALANCER, constants.UPDATE_DICT]))
-        if mark_active:
-            post_create_LB_flow.add(database_tasks.MarkLBActiveInDB(
-                name=sf_name + '-' + constants.MARK_LB_ACTIVE_INDB,
-                requires=constants.LOADBALANCER))
+        post_create_LB_flow.add(database_tasks.MarkLBActiveInDB(
+            name=sf_name + '-' + constants.MARK_LB_ACTIVE_INDB,
+            requires=constants.LOADBALANCER))
         return post_create_LB_flow
 
     def _get_delete_listeners_flow(self, lb):
@@ -214,8 +205,6 @@ class LoadBalancerFlows(object):
         (listeners_delete, store) = self._get_delete_listeners_flow(lb)
 
         delete_LB_flow = linear_flow.Flow(constants.DELETE_LOADBALANCER_FLOW)
-        delete_LB_flow.add(lifecycle_tasks.LoadBalancerToErrorOnRevertTask(
-            requires=constants.LOADBALANCER))
         delete_LB_flow.add(compute_tasks.NovaServerGroupDelete(
             requires=constants.SERVER_GROUP_ID))
         delete_LB_flow.add(database_tasks.MarkLBAmphoraeHealthBusy(
@@ -223,17 +212,15 @@ class LoadBalancerFlows(object):
         delete_LB_flow.add(listeners_delete)
         delete_LB_flow.add(network_tasks.UnplugVIP(
             requires=constants.LOADBALANCER))
-        delete_LB_flow.add(network_tasks.DeallocateVIP(
-            requires=constants.LOADBALANCER))
         delete_LB_flow.add(compute_tasks.DeleteAmphoraeOnLoadBalancer(
             requires=constants.LOADBALANCER))
         delete_LB_flow.add(database_tasks.MarkLBAmphoraeDeletedInDB(
             requires=constants.LOADBALANCER))
+        delete_LB_flow.add(network_tasks.DeallocateVIP(
+            requires=constants.LOADBALANCER))
         delete_LB_flow.add(database_tasks.DisableLBAmphoraeHealthMonitoring(
             requires=constants.LOADBALANCER))
         delete_LB_flow.add(database_tasks.MarkLBDeletedInDB(
-            requires=constants.LOADBALANCER))
-        delete_LB_flow.add(database_tasks.DecrementLoadBalancerQuota(
             requires=constants.LOADBALANCER))
 
         return (delete_LB_flow, store)
@@ -268,27 +255,21 @@ class LoadBalancerFlows(object):
         store.update(pool_store)
 
         delete_LB_flow = linear_flow.Flow(constants.DELETE_LOADBALANCER_FLOW)
-        delete_LB_flow.add(lifecycle_tasks.LoadBalancerToErrorOnRevertTask(
-            requires=constants.LOADBALANCER))
-        delete_LB_flow.add(compute_tasks.NovaServerGroupDelete(
-            requires=constants.SERVER_GROUP_ID))
         delete_LB_flow.add(database_tasks.MarkLBAmphoraeHealthBusy(
             requires=constants.LOADBALANCER))
         delete_LB_flow.add(pools_delete)
         delete_LB_flow.add(listeners_delete)
         delete_LB_flow.add(network_tasks.UnplugVIP(
             requires=constants.LOADBALANCER))
-        delete_LB_flow.add(network_tasks.DeallocateVIP(
-            requires=constants.LOADBALANCER))
         delete_LB_flow.add(compute_tasks.DeleteAmphoraeOnLoadBalancer(
             requires=constants.LOADBALANCER))
         delete_LB_flow.add(database_tasks.MarkLBAmphoraeDeletedInDB(
             requires=constants.LOADBALANCER))
+        delete_LB_flow.add(network_tasks.DeallocateVIP(
+            requires=constants.LOADBALANCER))
         delete_LB_flow.add(database_tasks.DisableLBAmphoraeHealthMonitoring(
             requires=constants.LOADBALANCER))
         delete_LB_flow.add(database_tasks.MarkLBDeletedInDB(
-            requires=constants.LOADBALANCER))
-        delete_LB_flow.add(database_tasks.DecrementLoadBalancerQuota(
             requires=constants.LOADBALANCER))
 
         return (delete_LB_flow, store)
@@ -310,9 +291,6 @@ class LoadBalancerFlows(object):
         new_LB_net_subflow.add(network_tasks.PlugVIP(
             requires=constants.LOADBALANCER,
             provides=constants.AMPS_DATA))
-        new_LB_net_subflow.add(network_tasks.ApplyQos(
-            requires=(constants.LOADBALANCER, constants.AMPS_DATA,
-                      constants.UPDATE_DICT)))
         new_LB_net_subflow.add(database_tasks.UpdateAmphoraVIPData(
             requires=constants.AMPS_DATA))
         new_LB_net_subflow.add(database_tasks.ReloadLoadBalancer(
@@ -322,7 +300,7 @@ class LoadBalancerFlows(object):
         new_LB_net_subflow.add(network_tasks.GetAmphoraeNetworkConfigs(
             requires=constants.LOADBALANCER,
             provides=constants.AMPHORAE_NETWORK_CONFIG))
-        new_LB_net_subflow.add(amphora_driver_tasks.AmphoraePostVIPPlug(
+        new_LB_net_subflow.add(amphora_driver_tasks.AmphoraPostVIPPlug(
             requires=(constants.LOADBALANCER,
                       constants.AMPHORAE_NETWORK_CONFIG)))
 
@@ -334,10 +312,11 @@ class LoadBalancerFlows(object):
         :returns: The flow for update a load balancer
         """
         update_LB_flow = linear_flow.Flow(constants.UPDATE_LOADBALANCER_FLOW)
-        update_LB_flow.add(lifecycle_tasks.LoadBalancerToErrorOnRevertTask(
-            requires=constants.LOADBALANCER))
-        update_LB_flow.add(network_tasks.ApplyQos(
-            requires=(constants.LOADBALANCER, constants.UPDATE_DICT)))
+        update_LB_flow.add(model_tasks.
+                           UpdateAttributes(
+                               rebind={constants.OBJECT:
+                                       constants.LOADBALANCER},
+                               requires=[constants.UPDATE_DICT]))
         update_LB_flow.add(amphora_driver_tasks.ListenersUpdate(
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
         update_LB_flow.add(database_tasks.UpdateLoadbalancerInDB(

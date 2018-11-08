@@ -14,26 +14,50 @@ Prerequisites
 This script assumes a typical Linux environment and was developed on
 Ubuntu 12.04.5 LTS.
 
-Python pip should be installed as well as the python modules found in the
-requirements.txt file.
+Python pip should be installed as well as the following python modules:
+
+ | argparse
+ | Babel>=1.3
+ | dib-utils
+ | PyYAML
 
 Your cache directory should have at least 1GB available, the working directory
 will need ~1.5GB, and your image destination will need ~500MB
 
-The script will use the version of diskimage-builder installed on your system,
-or it can be overridden by setting the following environment variables:
+The script expects to find the diskimage-builder and tripleo-image-elements
+git repositories one directory above the Octavia git repository.
 
+ | /<some directory>/octavia
+ | /<some directory>/diskimage-builder
+ | /<some directory>/tripleo-image-elements
+
+ | cd /<some directory>
+ | git clone https://github.com/openstack/octavia.git
+ | git clone https://git.openstack.org/openstack/diskimage-builder.git
+ | git clone https://git.openstack.org/openstack/tripleo-image-elements.git
+
+These paths can be overriden with the following environment variables:
+
+ | OCTAVIA_REPO_PATH = /<some directory>/octavia
  | DIB_REPO_PATH = /<some directory>/diskimage-builder
  | DIB_ELEMENTS = /<some directory>/diskimage-builder/elements
+ | ELEMENTS_REPO_PATH = /<some directory>/tripleo-image-elements
+ | TRIPLEO_ELEMENTS_PATH = /<some directory>/tripleo-image-elements/elements
 
 The following packages are required on each platform:
-Ubuntu: qemu git
-Fedora, CentOS and RedHat Enterprise Linux: qemu-img git
+Ubuntu and Fedora: qemu kpartx git
+CentOS and RedHat Enterprise Linux: qemu-kvm qemu-img kpartx git
+CentOS requires the EPEL repo and python-argparse:
+
+.. code:: bash
+
+    $ sudo rpm -Uvh --force http://mirrors.kernel.org/fedora-epel/6/i386/epel-release-6-8.noarch.rpm
+    $ yum install python-argparse
 
 Test Prerequisites
 ------------------
 The tox image tests require libguestfs-tools 1.24 or newer.
-Libguestfs allows testing the Amphora image without requiring root privileges.
+Libguestfs allows testing the Amphora image without requiring root privledges.
 On Ubuntu systems you also need to give read access to the kernels for the user
 running the tests:
 
@@ -47,7 +71,7 @@ Usage
 =====
 This script and associated elements will build Amphora images.  Current support
 is with an Ubuntu base OS and HAProxy.  The script can use Fedora
-as a base OS but these will not initially be tested or supported.
+or CentOS as a base OS but these will not initially be tested or supported.
 As the project progresses and/or the diskimage-builder project adds support
 for additional base OS options they may become available for Amphora images.
 This does not mean that they are necessarily supported or tested.
@@ -68,38 +92,26 @@ Command syntax:
             [-a i386 | **amd64** | armhf ]
             [-b **haproxy** ]
             [-c **~/.cache/image-create** | <cache directory> ]
-            [-d **xenial**/**7** | trusty | <other release id> ]
-            [-e]
             [-h]
-            [-i **ubuntu** | fedora | centos | rhel ]
-            [-l <log file> ]
-            [-n]
+            [-i **ubuntu** | fedora | centos ]
             [-o **amphora-x64-haproxy** | <filename> ]
-            [-p]
             [-r <root password> ]
-            [-s **2** | <size in GB> ]
+            [-s **5** | <size in GB> ]
             [-t **qcow2** | tar ]
             [-v]
             [-w <working directory> ]
-            [-x]
 
         '-a' is the architecture type for the image (default: amd64)
         '-b' is the backend type (default: haproxy)
         '-c' is the path to the cache directory (default: ~/.cache/image-create)
-        '-d' distribution release id (default on ubuntu: xenial)
-        '-e' enable complete mandatory access control systems when available (default: permissive)
         '-h' display help message
         '-i' is the base OS (default: ubuntu)
-        '-l' is output logfile (default: none)
-        '-n' disable sshd (default: enabled)
         '-o' is the output image file name
-        '-p' install amphora-agent from distribution packages (default: disabled)"
         '-r' enable the root account in the generated image (default: disabled)
-        '-s' is the image size to produce in gigabytes (default: 2)
+        '-s' is the image size to produce in gigabytes (default: 5)
         '-t' is the image type (default: qcow2)
         '-v' display the script version
         '-w' working directory for image building (default: .)
-        '-x' enable tracing for diskimage-builder
 
 
 Environment Variables
@@ -113,7 +125,7 @@ CLOUD_INIT_DATASOURCES
     - Options: NoCloud, ConfigDrive, OVF, MAAS, Ec2, <others>
     - Reference: https://launchpad.net/cloud-init
 
-DIB_DISTRIBUTION_MIRROR
+BASE_OS_MIRROR
     - URL to a mirror for the base OS selected
     - Default: None
 
@@ -135,73 +147,20 @@ DIB_REPO_PATH
     - Default: <directory above OCTAVIA_HOME>/diskimage-builder
     - Reference: https://github.com/openstack/diskimage-builder
 
+ELEMENTS_PATH
+    - Directory that contains the default elements
+    - Default: <ELEMENTS_REPO_PATH>/elements
+    - Reference: https://github.com/openstack/tripleo-image-elements
+
+ELEMENTS_REPO_PATH
+    - Directory containing tripleo-image-elements
+    - Default: <directory above OCTAVIA_HOME>/tripleo-image-elements
+    - Reference: https://github.com/openstack/tripleo-image-elements
+
 OCTAVIA_REPO_PATH
     - Directory containing octavia
-    - Default: <directory above the script location>
+    - <directory above the script location>
     - Reference: https://github.com/openstack/octavia
-
-Using distribution packages for amphora agent
----------------------------------------------
-By default, amphora agent is installed from Octavia Git repository.
-To use distribution packages, use the "-p" option.
-
-Note this needs a base system image with the required repositories enabled (for
-example RDO repositories for CentOS/Fedora). One of these variables must be
-set:
-
-DIB_LOCAL_IMAGE
-    - Path to the locally downloaded image
-    - Default: None
-
-DIB_CLOUD_IMAGES
-    - Directory base URL to download the image from
-    - Default: depends on the distribution
-
-For example to build a CentOS 7 amphora with Pike RPM packages:
-.. code:: bash
-
-    # Get image
-    $ wget https://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud.qcow2
-
-    # Add repository
-    $ virt-customize -a CentOS-7-x86_64-GenericCloud.qcow2  --selinux-relabel --run-command 'yum install -y centos-release-openstack-pike'
-
-    # Point to modified image and run script
-    $ export DIB_LOCAL_IMAGE=/home/stack/CentOS-7-x86_64-GenericCloud.qcow2
-    $ ./diskimage-create.sh -p -i centos
-
-RHEL specific variables
-------------------------
-Building a RHEL-based image requires:
-    - a RHEL 7 base cloud image, manually download from the
-      Red Hat Customer Portal. Set the DIB_LOCAL_IMAGE variable
-      to point to the file. More details at:
-      <DIB_REPO_PATH>/elements/rhel7
-
-    - a Red Hat subscription for the matching Red Hat OpenStack Platform
-      repository. Set the needed registration parameters depending on your
-      configuration. More details at:
-      <DIB_REPO_PATH>/elements/rhel-common
-
-Here is an example with Customer Portal registration and OSP 8 repository:
-.. code:: bash
-
-    $ export DIB_LOCAL_IMAGE='/tmp/rhel-guest-image-7.2-20160302.0.x86_64.qcow2'
-
-    $ export REG_METHOD='portal' REG_REPOS='rhel-7-server-openstack-8-rpms'
-
-    $ export REG_USER='<user>' REG_PASSWORD='<password>' REG_AUTO_ATTACH=true
-
-This example uses registration via a Satellite (the activation key must enable
-an OSP repository):
-.. code:: bash
-
-    $ export DIB_LOCAL_IMAGE='/tmp/rhel-guest-image-7.2-20160302.0.x86_64.qcow2'
-
-    $ export REG_METHOD='satellite' REG_ACTIVATION_KEY="<activation key>"
-
-    $ export REG_SAT_URL="<satellite url>" REG_ORG="<satellite org>"
-
 
 Container Support
 =================
@@ -221,6 +180,7 @@ and Sahara teams.  Thank you to everyone that worked on them for providing a
 great foundation for creating Octavia Amphora images.
 
     | https://github.com/openstack/diskimage-builder
+    | https://github.com/openstack/diskimage-builder/blob/master/docs/docker.md
     | https://github.com/openstack/tripleo-image-elements
     | https://github.com/openstack/sahara-image-elements
 

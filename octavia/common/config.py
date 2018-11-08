@@ -17,9 +17,6 @@
 Routines for configuring Octavia
 """
 
-import sys
-
-from keystoneauth1 import loading as ks_loading
 from oslo_config import cfg
 from oslo_db import options as db_options
 from oslo_log import log as logging
@@ -27,73 +24,39 @@ import oslo_messaging as messaging
 
 from octavia.common import constants
 from octavia.common import utils
-from octavia.i18n import _
+from octavia.i18n import _LI
 from octavia import version
 
 LOG = logging.getLogger(__name__)
 
-
 core_opts = [
-    cfg.HostnameOpt('host', default=utils.get_hostname(),
-                    help=_("The hostname Octavia is running on")),
-    cfg.StrOpt('octavia_plugins', default='hot_plug_plugin',
-               help=_("Name of the controller plugin to use")),
-]
-
-api_opts = [
-    cfg.IPOpt('bind_host', default='127.0.0.1',
+    cfg.IPOpt('bind_host', default='0.0.0.0',
               help=_("The host IP to bind to")),
     cfg.PortOpt('bind_port', default=9876,
                 help=_("The port to bind to")),
-    cfg.StrOpt('auth_strategy', default=constants.KEYSTONE,
-               choices=[constants.NOAUTH,
-                        constants.KEYSTONE,
-                        constants.TESTING],
-               help=_("The auth strategy for API requests.")),
     cfg.StrOpt('api_handler', default='queue_producer',
                help=_("The handler that the API communicates with")),
-    cfg.BoolOpt('allow_pagination', default=True,
-                help=_("Allow the usage of pagination")),
-    cfg.BoolOpt('allow_sorting', default=True,
-                help=_("Allow the usage of sorting")),
-    cfg.BoolOpt('allow_filtering', default=True,
-                help=_("Allow the usage of filtering")),
-    cfg.BoolOpt('allow_field_selection', default=True,
-                help=_("Allow the usage of field selection")),
-    cfg.StrOpt('pagination_max_limit',
-               default=str(constants.DEFAULT_PAGE_SIZE),
+    cfg.StrOpt('api_paste_config', default="api-paste.ini",
+               help=_("The API paste config file to use")),
+    cfg.StrOpt('api_extensions_path', default="",
+               help=_("The path for API extensions")),
+    cfg.StrOpt('auth_strategy', default='keystone',
+               help=_("The type of authentication to use")),
+    cfg.BoolOpt('allow_bulk', default=True,
+                help=_("Allow the usage of the bulk API")),
+    cfg.BoolOpt('allow_pagination', default=False,
+                help=_("Allow the usage of the pagination")),
+    cfg.BoolOpt('allow_sorting', default=False,
+                help=_("Allow the usage of the sorting")),
+    cfg.StrOpt('pagination_max_limit', default="-1",
                help=_("The maximum number of items returned in a single "
-                      "response. The string 'infinite' or a negative "
-                      "integer value means 'no limit'")),
-    cfg.StrOpt('api_base_uri',
-               help=_("Base URI for the API for use in pagination links. "
-                      "This will be autodetected from the request if not "
-                      "overridden here.")),
-    cfg.BoolOpt('api_v1_enabled', default=True,
-                help=_("Expose the v1 API?")),
-    cfg.BoolOpt('api_v2_enabled', default=True,
-                help=_("Expose the v2 API?")),
-    cfg.BoolOpt('allow_tls_terminated_listeners', default=True,
-                help=_("Allow users to create TLS Terminated listeners?")),
-    cfg.BoolOpt('allow_ping_health_monitors', default=True,
-                help=_("Allow users to create PING type Health Monitors?")),
-    cfg.DictOpt('enabled_provider_drivers',
-                help=_('List of enabled provider drivers and description '
-                       'dictionaries. Must match the driver name in the '
-                       'octavia.api.drivers entrypoint. Example: '
-                       '{\'amphora\': \'The Octavia Amphora driver.\', '
-                       '\'octavia\': \'Deprecated alias of the Octavia '
-                       'Amphora driver.\'}'),
-                default={'amphora': 'The Octavia Amphora driver.',
-                         'octavia': 'Deprecated alias of the Octavia Amphora '
-                         'driver.'}),
-    cfg.StrOpt('default_provider_driver', default='amphora',
-               help=_('Default provider driver.')),
-    cfg.IntOpt('udp_connect_min_interval_health_monitor',
-               default=3,
-               help=_("The minimum health monitor delay interval for the "
-                      "UDP-CONNECT Health Monitor type. A negative integer "
-                      "value means 'no limit'.")),
+                      "response, value was 'infinite' or negative integer "
+                      "means no limit")),
+    cfg.StrOpt('host', default=utils.get_hostname(),
+               help=_("The hostname Octavia is running on")),
+    cfg.StrOpt('octavia_plugins',
+               default='hot_plug_plugin',
+               help=_('Name of the controller plugin to use'))
 ]
 
 # Options only used by the amphora agent
@@ -104,52 +67,30 @@ amphora_agent_opts = [
                help=_("The server certificate for the agent.py server "
                       "to use")),
     cfg.StrOpt('agent_server_network_dir',
+               default='/etc/netns/{}/network/interfaces.d/'.format(
+                   constants.AMPHORA_NAMESPACE),
                help=_("The directory where new network interfaces "
                       "are located")),
     cfg.StrOpt('agent_server_network_file',
                help=_("The file where the network interfaces are located. "
                       "Specifying this will override any value set for "
                       "agent_server_network_dir.")),
-    cfg.IntOpt('agent_request_read_timeout', default=120,
-               help=_("The time in seconds to allow a request from the "
-                      "controller to run before terminating the socket.")),
     # Do not specify in octavia.conf, loaded at runtime
     cfg.StrOpt('amphora_id', help=_("The amphora ID.")),
-    cfg.StrOpt('amphora_udp_driver',
-               default='keepalived_lvs',
-               help='The UDP API backend for amphora agent.'),
 ]
 
 networking_opts = [
+    cfg.StrOpt('lb_network_name', help=_('Name of amphora internal network')),
     cfg.IntOpt('max_retries', default=15,
                help=_('The maximum attempts to retry an action with the '
                       'networking service.')),
     cfg.IntOpt('retry_interval', default=1,
                help=_('Seconds to wait before retrying an action with the '
-                      'networking service.')),
-    cfg.IntOpt('port_detach_timeout', default=300,
-               help=_('Seconds to wait for a port to detach from an '
-                      'amphora.')),
-    cfg.BoolOpt('allow_vip_network_id', default=True,
-                help=_('Can users supply a network_id for their VIP?')),
-    cfg.BoolOpt('allow_vip_subnet_id', default=True,
-                help=_('Can users supply a subnet_id for their VIP?')),
-    cfg.BoolOpt('allow_vip_port_id', default=True,
-                help=_('Can users supply a port_id for their VIP?')),
-    cfg.ListOpt('valid_vip_networks',
-                help=_('List of network_ids that are valid for VIP '
-                       'creation. If this field is empty, no validation '
-                       'is performed.')),
-    cfg.ListOpt('reserved_ips',
-                default=['169.254.169.254'],
-                item_type=cfg.types.IPAddress(),
-                help=_('List of IP addresses reserved from being used for '
-                       'member addresses. IPv6 addresses should be in '
-                       'expanded, uppercase form.')),
+                      'networking service.'))
 ]
 
 healthmanager_opts = [
-    cfg.IPOpt('bind_ip', default='127.0.0.1',
+    cfg.IPOpt('bind_ip', default='0.0.0.0',
               help=_('IP address the controller will listen on for '
                      'heart beats')),
     cfg.PortOpt('bind_port', default=5555,
@@ -158,20 +99,9 @@ healthmanager_opts = [
     cfg.IntOpt('failover_threads',
                default=10,
                help=_('Number of threads performing amphora failovers.')),
-    # TODO(tatsuma) Remove in or after "T" release
     cfg.IntOpt('status_update_threads',
-               default=None,
-               help=_('Number of processes for amphora status update.'),
-               deprecated_for_removal=True,
-               deprecated_reason=_('This option is replaced as '
-                                   'health_update_threads and '
-                                   'stats_update_threads')),
-    cfg.IntOpt('health_update_threads',
-               default=None,
-               help=_('Number of processes for amphora health update.')),
-    cfg.IntOpt('stats_update_threads',
-               default=None,
-               help=_('Number of processes for amphora stats update.')),
+               default=50,
+               help=_('Number of threads performing amphora status update.')),
     cfg.StrOpt('heartbeat_key',
                help=_('key used to validate amphora sending'
                       'the message'), secret=True),
@@ -193,34 +123,27 @@ healthmanager_opts = [
                 default=[]),
     cfg.IntOpt('heartbeat_interval',
                default=10,
-               help=_('Sleep time between sending heartbeats.')),
-
-    # Used for updating health and stats
-    cfg.StrOpt('health_update_driver', default='health_db',
-               help=_('Driver for updating amphora health system.')),
-    cfg.StrOpt('stats_update_driver', default='stats_db',
-               help=_('Driver for updating amphora statistics.')),
-
-    # Used for synchronizing neutron-lbaas and octavia
+               help=_('Sleep time between sending hearthbeats.')),
     cfg.StrOpt('event_streamer_driver',
                help=_('Specifies which driver to use for the event_streamer '
                       'for syncing the octavia and neutron_lbaas dbs. If you '
                       'don\'t need to sync the database or are running '
                       'octavia in stand alone mode use the '
                       'noop_event_streamer'),
-               default='noop_event_streamer'),
-    cfg.BoolOpt('sync_provisioning_status', default=False,
-                help=_("Enable provisioning status sync with neutron db"))]
+               default='noop_event_streamer')]
 
 oslo_messaging_opts = [
     cfg.StrOpt('topic'),
     cfg.StrOpt('event_stream_topic',
                default='neutron_lbaas_event',
                help=_('topic name for communicating events through a queue')),
-    cfg.StrOpt('event_stream_transport_url', default=None,
-               help=_('Transport URL to use for the neutron-lbaas'
-                      'synchronization event stream when neutron and octavia'
-                      'have separate queues.')),
+]
+
+keystone_authtoken_v3_opts = [
+    cfg.StrOpt('admin_user_domain', default='default',
+               help=_('Admin user keystone authentication domain')),
+    cfg.StrOpt('admin_project_domain', default='default',
+               help=_('Admin project keystone authentication domain'))
 ]
 
 haproxy_amphora_opts = [
@@ -231,8 +154,6 @@ haproxy_amphora_opts = [
                default='/var/lib/octavia/certs',
                help=_('Base directory for cert storage.')),
     cfg.StrOpt('haproxy_template', help=_('Custom haproxy template.')),
-    cfg.BoolOpt('connection_logging', default=True,
-                help=_('Set this to False to disable connection logging.')),
     cfg.IntOpt('connection_max_retries',
                default=300,
                help=_('Retry threshold for connecting to amphorae.')),
@@ -240,38 +161,15 @@ haproxy_amphora_opts = [
                default=5,
                help=_('Retry timeout between connection attempts in '
                       'seconds.')),
-    cfg.IntOpt('active_connection_max_retries',
-               default=15,
-               help=_('Retry threshold for connecting to active amphorae.')),
-    cfg.IntOpt('active_connection_rety_interval',
-               default=2,
-               help=_('Retry timeout between connection attempts in '
-                      'seconds for active amphora.')),
-    cfg.IntOpt('build_rate_limit',
-               default=-1,
-               help=_('Number of amphorae that could be built per controller'
-                      'worker, simultaneously.')),
-    cfg.IntOpt('build_active_retries',
-               default=300,
-               help=_('Retry threshold for waiting for a build slot for '
-                      'an amphorae.')),
-    cfg.IntOpt('build_retry_interval',
-               default=5,
-               help=_('Retry timeout between build attempts in '
-                      'seconds.')),
     cfg.StrOpt('haproxy_stick_size', default='10k',
                help=_('Size of the HAProxy stick table. Accepts k, m, g '
                       'suffixes.  Example: 10k')),
 
     # REST server
-    cfg.IPOpt('bind_host', default='::',  # nosec
+    cfg.IPOpt('bind_host', default='0.0.0.0',
               help=_("The host IP to bind to")),
     cfg.PortOpt('bind_port', default=9443,
                 help=_("The port to bind to")),
-    cfg.StrOpt('lb_network_interface',
-               default='o-hm0',
-               help=_('Network interface through which to reach amphora, only '
-                      'required if using IPv6 link local addresses.')),
     cfg.StrOpt('haproxy_cmd', default='/usr/sbin/haproxy',
                help=_("The full path to haproxy")),
     cfg.IntOpt('respawn_count', default=2,
@@ -284,36 +182,18 @@ haproxy_amphora_opts = [
     cfg.FloatOpt('rest_request_read_timeout', default=60,
                  help=_("The time in seconds to wait for a REST API "
                         "response.")),
-    cfg.IntOpt('timeout_client_data',
-               default=constants.DEFAULT_TIMEOUT_CLIENT_DATA,
-               help=_('Frontend client inactivity timeout.')),
-    cfg.IntOpt('timeout_member_connect',
-               default=constants.DEFAULT_TIMEOUT_MEMBER_CONNECT,
-               help=_('Backend member connection timeout.')),
-    cfg.IntOpt('timeout_member_data',
-               default=constants.DEFAULT_TIMEOUT_MEMBER_DATA,
-               help=_('Backend member inactivity timeout.')),
-    cfg.IntOpt('timeout_tcp_inspect',
-               default=constants.DEFAULT_TIMEOUT_TCP_INSPECT,
-               help=_('Time to wait for TCP packets for content inspection.')),
     # REST client
     cfg.StrOpt('client_cert', default='/etc/octavia/certs/client.pem',
                help=_("The client certificate to talk to the agent")),
     cfg.StrOpt('server_ca', default='/etc/octavia/certs/server_ca.pem',
                help=_("The ca which signed the server certificates")),
     cfg.BoolOpt('use_upstart', default=True,
-                deprecated_for_removal=True,
-                deprecated_reason='This is now automatically discovered '
-                                  ' and configured.',
                 help=_("If False, use sysvinit.")),
 ]
 
 controller_worker_opts = [
-    cfg.IntOpt('workers',
-               default=1, min=1,
-               help='Number of workers for the controller-worker service.'),
     cfg.IntOpt('amp_active_retries',
-               default=30,
+               default=10,
                help=_('Retry attempts to wait for Amphora to become active')),
     cfg.IntOpt('amp_active_wait_sec',
                default=10,
@@ -333,30 +213,19 @@ controller_worker_opts = [
                deprecated_for_removal=True,
                deprecated_reason='Superseded by amp_image_tag option.',
                help=_('Glance image id for the Amphora image to boot')),
-    cfg.StrOpt('amp_image_owner_id',
-               default='',
-               help=_('Restrict glance image selection to a specific '
-                      'owner ID.  This is a recommended security setting.')),
     cfg.StrOpt('amp_ssh_key_name',
                default='',
                help=_('SSH key name used to boot the Amphora')),
     cfg.BoolOpt('amp_ssh_access_allowed',
                 default=True,
-                deprecated_for_removal=True,
-                deprecated_reason='This option and amp_ssh_key_name overlap '
-                                  'in functionality, and only one is needed. '
-                                  'SSH access can be enabled/disabled simply '
-                                  'by setting amp_ssh_key_name, or not.',
                 help=_('Determines whether or not to allow access '
                        'to the Amphorae')),
-    cfg.ListOpt('amp_boot_network_list',
-                default='',
-                help=_('List of networks to attach to the Amphorae. '
-                       'All networks defined in the list will '
-                       'be attached to each amphora.')),
+    cfg.StrOpt('amp_network',
+               default='',
+               help=_('Network to attach to the Amphora')),
     cfg.ListOpt('amp_secgroup_list',
                 default='',
-                help=_('List of security groups to attach to the Amphora.')),
+                help=_('List of security groups to attach to the Amphora')),
     cfg.StrOpt('client_ca',
                default='/etc/octavia/certs/ca_01.pem',
                help=_('Client CA for the amphora agent to use')),
@@ -369,9 +238,9 @@ controller_worker_opts = [
     cfg.StrOpt('network_driver',
                default='network_noop_driver',
                help=_('Name of the network driver to use')),
-    cfg.StrOpt('distributor_driver',
-               default='distributor_noop_driver',
-               help=_('Name of the distributor driver to use')),
+    cfg.StrOpt('cert_generator',
+               default='local_cert_generator',
+               help=_('Name of the cert generator to use')),
     cfg.StrOpt('loadbalancer_topology',
                default=constants.TOPOLOGY_SINGLE,
                choices=constants.SUPPORTED_LB_TOPOLOGIES,
@@ -391,12 +260,7 @@ task_flow_opts = [
                help=_('TaskFlow engine to use')),
     cfg.IntOpt('max_workers',
                default=5,
-               help=_('The maximum number of workers')),
-    cfg.BoolOpt('disable_revert', default=False,
-                help=_('If True, disables the controller worker taskflow '
-                       'flows from reverting.  This will leave resources in '
-                       'an inconsistent state and should only be used for '
-                       'debugging purposes.'))
+               help=_('The maximum number of workers'))
 ]
 
 core_cli_opts = []
@@ -411,22 +275,12 @@ certificate_opts = [
     cfg.StrOpt('barbican_auth',
                default='barbican_acl_auth',
                help='Name of the Barbican authentication method to use'),
-    cfg.StrOpt('service_name',
-               help=_('The name of the certificate service in the keystone'
-                      'catalog')),
-    cfg.StrOpt('endpoint', help=_('A new endpoint to override the endpoint '
-                                  'in the keystone catalog.')),
     cfg.StrOpt('region_name',
                help='Region in Identity service catalog to use for '
                     'communication with the barbican service.'),
     cfg.StrOpt('endpoint_type',
                default='publicURL',
-               help='The endpoint_type to be used for barbican service.'),
-    cfg.StrOpt('ca_certificates_file',
-               help=_('CA certificates file path')),
-    cfg.BoolOpt('insecure',
-                default=False,
-                help=_('Disable certificate validation on SSL connections ')),
+               help='The endpoint_type to be used for barbican service.')
 ]
 
 house_keeping_opts = [
@@ -442,9 +296,6 @@ house_keeping_opts = [
     cfg.IntOpt('amphora_expiry_age',
                default=604800,
                help=_('Amphora expiry age in seconds')),
-    cfg.IntOpt('load_balancer_expiry_age',
-               default=604800,
-               help=_('Load balancer expiry age in seconds')),
     cfg.IntOpt('cert_interval',
                default=3600,
                help=_('Certificate check interval in seconds')),
@@ -463,8 +314,10 @@ anchor_opts = [
                default='http://localhost:9999/v1/sign/default',
                help=_('Anchor URL')),
     cfg.StrOpt('username',
+               default='myusername',
                help=_('Anchor username')),
     cfg.StrOpt('password',
+               default='simplepassword',
                help=_('Anchor password'),
                secret=True)
 ]
@@ -479,11 +332,11 @@ keepalived_vrrp_opts = [
                help=_('VRRP health check script run interval in seconds.')),
     cfg.IntOpt('vrrp_fail_count',
                default=2,
-               help=_('Number of successive failures before transition to a '
+               help=_('Number of successive failure before transition to a '
                       'fail state.')),
     cfg.IntOpt('vrrp_success_count',
                default=2,
-               help=_('Number of consecutive successes before transition to a '
+               help=_('Number of successive failure before transition to a '
                       'success state.')),
     cfg.IntOpt('vrrp_garp_refresh_interval',
                default=5,
@@ -510,21 +363,12 @@ nova_opts = [
                help=_('CA certificates file path')),
     cfg.BoolOpt('insecure',
                 default=False,
-                help=_('Disable certificate validation on SSL connections')),
+                help=_('Disable certificate validation on SSL connections ')),
     cfg.BoolOpt('enable_anti_affinity', default=False,
                 help=_('Flag to indicate if nova anti-affinity feature is '
-                       'turned on.')),
-    cfg.StrOpt('anti_affinity_policy', default=constants.ANTI_AFFINITY,
-               choices=[constants.ANTI_AFFINITY, constants.SOFT_ANTI_AFFINITY],
-               help=_('Sets the anti-affinity policy for nova')),
-    cfg.IntOpt('random_amphora_name_length', default=0,
-               help=_('If non-zero, generate a random name of the length '
-                      'provided for each amphora, in the format "a[A-Z0-9]*". '
-                      'Otherwise, the default name format will be used: '
-                      '"amphora-{UUID}".')),
-    cfg.StrOpt('availability_zone', default=None,
-               help=_('Availability zone to use for creating Amphorae')),
+                       'turned on.'))
 ]
+
 neutron_opts = [
     cfg.StrOpt('service_name',
                help=_('The name of the neutron service in the '
@@ -561,28 +405,9 @@ glance_opts = [
                 help=_('Disable certificate validation on SSL connections ')),
 ]
 
-quota_opts = [
-    cfg.IntOpt('default_load_balancer_quota',
-               default=constants.QUOTA_UNLIMITED,
-               help=_('Default per project load balancer quota.')),
-    cfg.IntOpt('default_listener_quota',
-               default=constants.QUOTA_UNLIMITED,
-               help=_('Default per project listener quota.')),
-    cfg.IntOpt('default_member_quota',
-               default=constants.QUOTA_UNLIMITED,
-               help=_('Default per project member quota.')),
-    cfg.IntOpt('default_pool_quota',
-               default=constants.QUOTA_UNLIMITED,
-               help=_('Default per project pool quota.')),
-    cfg.IntOpt('default_health_monitor_quota',
-               default=constants.QUOTA_UNLIMITED,
-               help=_('Default per project health monitor quota.')),
-]
-
 
 # Register the configuration options
 cfg.CONF.register_opts(core_opts)
-cfg.CONF.register_opts(api_opts, group='api_settings')
 cfg.CONF.register_opts(amphora_agent_opts, group='amphora_agent')
 cfg.CONF.register_opts(networking_opts, group='networking')
 cfg.CONF.register_opts(oslo_messaging_opts, group='oslo_messaging')
@@ -590,15 +415,18 @@ cfg.CONF.register_opts(haproxy_amphora_opts, group='haproxy_amphora')
 cfg.CONF.register_opts(controller_worker_opts, group='controller_worker')
 cfg.CONF.register_opts(keepalived_vrrp_opts, group='keepalived_vrrp')
 cfg.CONF.register_opts(task_flow_opts, group='task_flow')
+cfg.CONF.register_opts(oslo_messaging_opts, group='oslo_messaging')
 cfg.CONF.register_opts(house_keeping_opts, group='house_keeping')
 cfg.CONF.register_opts(anchor_opts, group='anchor')
 cfg.CONF.register_cli_opts(core_cli_opts)
 cfg.CONF.register_opts(certificate_opts, group='certificates')
 cfg.CONF.register_cli_opts(healthmanager_opts, group='health_manager')
+cfg.CONF.import_group('keystone_authtoken', 'keystonemiddleware.auth_token')
+cfg.CONF.register_opts(keystone_authtoken_v3_opts,
+                       group='keystone_authtoken_v3')
 cfg.CONF.register_opts(nova_opts, group='nova')
 cfg.CONF.register_opts(glance_opts, group='glance')
 cfg.CONF.register_opts(neutron_opts, group='neutron')
-cfg.CONF.register_opts(quota_opts, group='quotas')
 
 
 # Ensure that the control exchange is set correctly
@@ -606,20 +434,18 @@ messaging.set_transport_defaults(control_exchange='octavia')
 _SQL_CONNECTION_DEFAULT = 'sqlite://'
 # Update the default QueuePool parameters. These can be tweaked by the
 # configuration variables - max_pool_size, max_overflow and pool_timeout
-db_options.set_defaults(cfg.CONF, connection=_SQL_CONNECTION_DEFAULT,
-                        max_pool_size=10, max_overflow=20, pool_timeout=10)
+db_options.set_defaults(cfg.CONF,
+                        connection=_SQL_CONNECTION_DEFAULT,
+                        sqlite_db='', max_pool_size=10,
+                        max_overflow=20, pool_timeout=10)
 
 logging.register_options(cfg.CONF)
-
-ks_loading.register_auth_conf_options(cfg.CONF, constants.SERVICE_AUTH)
-ks_loading.register_session_conf_options(cfg.CONF, constants.SERVICE_AUTH)
 
 
 def init(args, **kwargs):
     cfg.CONF(args=args, project='octavia',
              version='%%prog %s' % version.version_info.release_string(),
              **kwargs)
-    handle_deprecation_compatibility()
 
 
 def setup_logging(conf):
@@ -629,23 +455,31 @@ def setup_logging(conf):
     """
     product_name = "octavia"
     logging.setup(conf, product_name)
-    LOG.info("Logging enabled!")
-    LOG.info("%(prog)s version %(version)s",
-             {'prog': sys.argv[0],
-              'version': version.version_info.release_string()})
-    LOG.debug("command line: %s", " ".join(sys.argv))
+    LOG.info(_LI("Logging enabled!"))
 
 
-# Use cfg.CONF.set_default to override the new configuration setting
-# default value.  This allows a value set, at the new location, to override
-# a value set in the previous location while allowing settings that have
-# not yet been moved to be utilized.
-def handle_deprecation_compatibility():
-    # TODO(tatsuma) Remove in or after "T" release
-    if cfg.CONF.health_manager.status_update_threads is not None:
-        cfg.CONF.set_default('health_update_threads',
-                             cfg.CONF.health_manager.status_update_threads,
-                             group='health_manager')
-        cfg.CONF.set_default('stats_update_threads',
-                             cfg.CONF.health_manager.status_update_threads,
-                             group='health_manager')
+# def load_paste_app(app_name):
+#     """Builds and returns a WSGI app from a paste config file.
+
+#     :param app_name: Name of the application to load
+#     :raises ConfigFilesNotFoundError when config file cannot be located
+#     :raises RuntimeError when application cannot be loaded from config file
+#     """
+
+#     config_path = cfg.CONF.find_file(cfg.CONF.api_paste_config)
+#     if not config_path:
+#         raise cfg.ConfigFilesNotFoundError(
+#             config_files=[cfg.CONF.api_paste_config])
+#     config_path = os.path.abspath(config_path)
+#     LOG.info(_LI("Config paste file: %s"), config_path)
+
+#     try:
+#         app = deploy.loadapp("config:%s" % config_path, name=app_name)
+#     except (LookupError, ImportError):
+#         msg = (_("Unable to load %(app_name)s from "
+#                  "configuration file %(config_path)s.") %
+#                {'app_name': app_name,
+#                 'config_path': config_path})
+#         LOG.exception(msg)
+#         raise RuntimeError(msg)
+#     return app

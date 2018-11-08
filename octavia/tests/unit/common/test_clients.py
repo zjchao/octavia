@@ -26,13 +26,14 @@ CONF = cfg.CONF
 class TestNovaAuth(base.TestCase):
 
     def setUp(self):
+        CONF.set_override(group='keystone_authtoken', name='auth_version',
+                          override='2', enforce_type=True)
         # Reset the session and client
         clients.NovaAuth.nova_client = None
         keystone._SESSION = None
 
         super(TestNovaAuth, self).setUp()
 
-    @mock.patch('keystoneauth1.session.Session', mock.Mock())
     def test_get_nova_client(self):
         # There should be no existing client
         self.assertIsNone(
@@ -64,13 +65,14 @@ class TestNovaAuth(base.TestCase):
 class TestNeutronAuth(base.TestCase):
 
     def setUp(self):
+        CONF.set_override(group='keystone_authtoken', name='auth_version',
+                          override='2', enforce_type=True)
         # Reset the session and client
         clients.NeutronAuth.neutron_client = None
         keystone._SESSION = None
 
         super(TestNeutronAuth, self).setUp()
 
-    @mock.patch('keystoneauth1.session.Session', mock.Mock())
     def test_get_neutron_client(self):
         # There should be no existing client
         self.assertIsNone(
@@ -102,13 +104,14 @@ class TestNeutronAuth(base.TestCase):
 class TestGlanceAuth(base.TestCase):
 
     def setUp(self):
+        CONF.set_override(group='keystone_authtoken', name='auth_version',
+                          override='2', enforce_type=True)
         # Reset the session and client
         clients.GlanceAuth.glance_client = None
         keystone._SESSION = None
 
         super(TestGlanceAuth, self).setUp()
 
-    @mock.patch('keystoneauth1.session.Session', mock.Mock())
     def test_get_glance_client(self):
         # There should be no existing client
         self.assertIsNone(

@@ -1,29 +1,73 @@
-.. octavia documentation master file
+.. octavia-specs documentation master file
 
-=====================
-Octavia Documentation
-=====================
+====
+Main
+====
 
-Welcome to the OpenStack Octavia project documentation. Octavia brings
-network load balancing to OpenStack.
-
-See :doc:`reference/introduction` for an overview of Octavia.
-
-To align with the overall OpenStack documentation, the Octavia documentation
-is grouped into the following topic areas.
+Getting started
+---------------
 
 .. toctree::
    :maxdepth: 1
 
-   admin/index.rst
-   Octavia API Reference <https://developer.openstack.org/api-ref/load-balancer/>
-   cli/index.rst
-   configuration/index.rst
-   contributor/index.rst
-   install/index.rst
-   reference/index.rst
-   user/index.rst
+   main/glossary.rst
 
+For developers
+--------------
 
+.. toctree::
+   :maxdepth: 1
 
-:ref:`search`
+   main/CONSTITUTION.rst
+   main/HACKING.rst
+
+====
+APIs
+====
+
+.. toctree::
+   :glob:
+   :maxdepth: 1
+
+   api/*
+
+====================
+Design Documentation
+====================
+
+Version 0.5
+-----------
+
+.. toctree::
+   :glob:
+   :maxdepth: 1
+
+   design/version0.5/*
+
+======================
+Project Specifications
+======================
+
+Version 0.5
+-----------
+
+.. toctree::
+   :glob:
+   :maxdepth: 1
+
+   specs/version0.5/*
+
+Version 1
+---------
+
+.. toctree::
+   :glob:
+   :maxdepth: 1
+
+   specs/version1/*
+
+==================
+Indices and tables
+==================
+
+* :ref:`search`

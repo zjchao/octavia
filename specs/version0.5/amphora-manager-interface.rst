@@ -53,7 +53,7 @@ Establish an abstract base class to model the desired functionality:
             groups
             :param network_ids: A list of network_ids to attach to
             the amphora
-            :config_drive_files: A dict of files to overwrite on
+            :config_drive_files:  A dict of files to overrwrite on
             the server upon boot. Keys are file names (i.e. /etc/passwd)
             and values are the file contents (either as a string or as
             a file-like object). A maximum of five entries is allowed,
@@ -84,7 +84,7 @@ Establish an abstract base class to model the desired functionality:
             raise NotImplementedError
 
         def get_amphora(self, amphora_name = None, amphora_id = None):
-            """ Try to find an amphora given its name or id
+            """ Try to find a amphora given its name or id
 
             :param amphora_name: the name of the desired amphora
             :param amphora_id: the id of the desired amphora

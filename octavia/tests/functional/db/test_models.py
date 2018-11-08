@@ -29,7 +29,6 @@ class ModelTestMixin(object):
     FAKE_IP = '10.0.0.1'
     FAKE_UUID_1 = uuidutils.generate_uuid()
     FAKE_UUID_2 = uuidutils.generate_uuid()
-    FAKE_AZ = 'zone1'
 
     def _insert(self, session, model_cls, model_kwargs):
         with session.begin():
@@ -51,15 +50,12 @@ class ModelTestMixin(object):
         kwargs.update(overrides)
         return self._insert(session, models.Listener, kwargs)
 
-    def create_listener_statistics(self, session, listener_id, amphora_id,
-                                   **overrides):
+    def create_listener_statistics(self, session, listener_id, **overrides):
         kwargs = {'listener_id': listener_id,
-                  'amphora_id': amphora_id,
                   'bytes_in': 0,
                   'bytes_out': 0,
                   'active_connections': 0,
-                  'total_connections': 0,
-                  'request_errors': 0}
+                  'total_connections': 0}
         kwargs.update(overrides)
         return self._insert(session, models.ListenerStatistics, kwargs)
 
@@ -68,7 +64,6 @@ class ModelTestMixin(object):
                   'id': self.FAKE_UUID_1,
                   'protocol': constants.PROTOCOL_HTTP,
                   'lb_algorithm': constants.LB_ALGORITHM_LEAST_CONNECTIONS,
-                  'provisioning_status': constants.ACTIVE,
                   'operating_status': constants.ONLINE,
                   'enabled': True}
         kwargs.update(overrides)
@@ -82,16 +77,13 @@ class ModelTestMixin(object):
         return self._insert(session, models.SessionPersistence, kwargs)
 
     def create_health_monitor(self, session, pool_id, **overrides):
-        kwargs = {'id': pool_id,
-                  'pool_id': pool_id,
+        kwargs = {'pool_id': pool_id,
                   'type': constants.HEALTH_MONITOR_HTTP,
                   'delay': 1,
                   'timeout': 1,
                   'fall_threshold': 1,
                   'rise_threshold': 1,
                   'enabled': True,
-                  'operating_status': constants.ONLINE,
-                  'provisioning_status': constants.ACTIVE,
                   'project_id': self.FAKE_UUID_1}
         kwargs.update(overrides)
         return self._insert(session, models.HealthMonitor, kwargs)
@@ -102,10 +94,8 @@ class ModelTestMixin(object):
                   'pool_id': pool_id,
                   'ip_address': '10.0.0.1',
                   'protocol_port': 80,
-                  'provisioning_status': constants.ACTIVE,
                   'operating_status': constants.ONLINE,
-                  'enabled': True,
-                  'backup': False}
+                  'enabled': True}
         kwargs.update(overrides)
         return self._insert(session, models.Member, kwargs)
 
@@ -140,8 +130,7 @@ class ModelTestMixin(object):
                   'ha_port_id': self.FAKE_UUID_2,
                   'lb_network_ip': self.FAKE_IP,
                   'cert_expiration': datetime.datetime.utcnow(),
-                  'cert_busy': False,
-                  'cached_zone': self.FAKE_AZ}
+                  'cert_busy': False}
         kwargs.update(overrides)
         return self._insert(session, models.Amphora, kwargs)
 
@@ -157,8 +146,6 @@ class ModelTestMixin(object):
                   'listener_id': listener_id,
                   'action': constants.L7POLICY_ACTION_REJECT,
                   'position': 1,
-                  'provisioning_status': constants.ACTIVE,
-                  'operating_status': constants.ONLINE,
                   'enabled': True}
         kwargs.update(overrides)
         return self._insert(session, models.L7Policy, kwargs)
@@ -168,10 +155,7 @@ class ModelTestMixin(object):
                   'l7policy_id': l7policy_id,
                   'type': constants.L7RULE_TYPE_PATH,
                   'compare_type': constants.L7RULE_COMPARE_TYPE_STARTS_WITH,
-                  'value': '/api',
-                  'provisioning_status': constants.ACTIVE,
-                  'operating_status': constants.ONLINE,
-                  'enabled': True}
+                  'value': '/api'}
         kwargs.update(overrides)
         return self._insert(session, models.L7Rule, kwargs)
 
@@ -179,21 +163,15 @@ class ModelTestMixin(object):
 class PoolModelTest(base.OctaviaDBTestBase, ModelTestMixin):
 
     def test_create(self):
-        pool = self.create_pool(self.session)
-
-        self.assertIsNotNone(pool.created_at)
-        self.assertIsNone(pool.updated_at)
+        self.create_pool(self.session)
 
     def test_update(self):
         pool = self.create_pool(self.session)
-        self.assertIsNone(pool.updated_at)
-
         id = pool.id
-        pool.enabled = False
+        pool.name = 'test1'
         new_pool = self.session.query(
             models.Pool).filter_by(id=id).first()
-        self.assertFalse(new_pool.enabled)
-        self.assertIsNotNone(new_pool.updated_at)
+        self.assertEqual('test1', new_pool.name)
 
     def test_delete(self):
         pool = self.create_pool(self.session)
@@ -253,22 +231,15 @@ class MemberModelTest(base.OctaviaDBTestBase, ModelTestMixin):
         self.pool = self.create_pool(self.session)
 
     def test_create(self):
-        member = self.create_member(self.session, self.pool.id)
-
-        self.assertIsNotNone(member.created_at)
-        self.assertIsNone(member.updated_at)
+        self.create_member(self.session, self.pool.id)
 
     def test_update(self):
         member = self.create_member(self.session, self.pool.id)
-        self.assertIsNone(member.updated_at)
-
         member_id = member.id
-        member.enabled = False
-
+        member.name = 'test1'
         new_member = self.session.query(
             models.Member).filter_by(id=member_id).first()
-        self.assertFalse(new_member.enabled)
-        self.assertIsNotNone(new_member.updated_at)
+        self.assertEqual('test1', new_member.name)
 
     def test_delete(self):
         member = self.create_member(self.session, self.pool.id)
@@ -330,50 +301,15 @@ class SessionPersistenceModelTest(base.OctaviaDBTestBase, ModelTestMixin):
 class ListenerModelTest(base.OctaviaDBTestBase, ModelTestMixin):
 
     def test_create(self):
-        listener = self.create_listener(self.session)
-
-        self.assertIsNotNone(listener.created_at)
-        self.assertIsNone(listener.updated_at)
-
-    def test_create_with_timeouts(self):
-        timeouts = {
-            'timeout_client_data': 1,
-            'timeout_member_connect': 2,
-            'timeout_member_data': constants.MIN_TIMEOUT,
-            'timeout_tcp_inspect': constants.MAX_TIMEOUT,
-        }
-        listener = self.create_listener(self.session, **timeouts)
-        for item in timeouts:
-            self.assertEqual(timeouts[item], getattr(listener, item))
+        self.create_listener(self.session)
 
     def test_update(self):
         listener = self.create_listener(self.session)
-        self.assertIsNone(listener.updated_at)
-
         listener_id = listener.id
         listener.name = 'test1'
         new_listener = self.session.query(
             models.Listener).filter_by(id=listener_id).first()
         self.assertEqual('test1', new_listener.name)
-        self.assertIsNotNone(new_listener.updated_at)
-
-    def test_update_with_timeouts(self):
-        listener = self.create_listener(self.session)
-        listener_id = listener.id
-
-        timeouts = {
-            'timeout_client_data': 1,
-            'timeout_member_connect': 2,
-            'timeout_member_data': 3,
-            'timeout_tcp_inspect': 4,
-        }
-
-        for item in timeouts:
-            setattr(listener, item, timeouts[item])
-        new_listener = self.session.query(
-            models.Listener).filter_by(id=listener_id).first()
-        for item in timeouts:
-            self.assertEqual(timeouts[item], getattr(new_listener, item))
 
     def test_delete(self):
         listener = self.create_listener(self.session)
@@ -392,6 +328,14 @@ class ListenerModelTest(base.OctaviaDBTestBase, ModelTestMixin):
             models.Listener).filter_by(id=listener.id).first()
         self.assertIsNotNone(new_listener.load_balancer)
         self.assertIsInstance(new_listener.load_balancer, models.LoadBalancer)
+
+    def test_listener_statistics_relationship(self):
+        listener = self.create_listener(self.session)
+        self.create_listener_statistics(self.session, listener_id=listener.id)
+        new_listener = self.session.query(models.Listener).filter_by(
+            id=listener.id).first()
+        self.assertIsNotNone(new_listener.stats)
+        self.assertIsInstance(new_listener.stats, models.ListenerStatistics)
 
     def test_default_pool_relationship(self):
         pool = self.create_pool(self.session)
@@ -429,36 +373,32 @@ class ListenerStatisticsModelTest(base.OctaviaDBTestBase, ModelTestMixin):
     def setUp(self):
         super(ListenerStatisticsModelTest, self).setUp()
         self.listener = self.create_listener(self.session)
-        self.amphora = self.create_amphora(self.session)
 
     def test_create(self):
-        self.create_listener_statistics(self.session, self.listener.id,
-                                        self.amphora.id)
-
-    def test_create_with_negative_int(self):
-        overrides = {'bytes_in': -1}
-        self.assertRaises(ValueError,
-                          self.create_listener_statistics,
-                          self.session, self.listener.id,
-                          self.amphora.id, **overrides)
+        self.create_listener_statistics(self.session, self.listener.id)
 
     def test_update(self):
-        stats = self.create_listener_statistics(self.session, self.listener.id,
-                                                self.amphora.id)
+        stats = self.create_listener_statistics(self.session, self.listener.id)
         stats.name = 'test1'
         new_stats = self.session.query(models.ListenerStatistics).filter_by(
             listener_id=self.listener.id).first()
         self.assertEqual('test1', new_stats.name)
 
     def test_delete(self):
-        stats = self.create_listener_statistics(self.session, self.listener.id,
-                                                self.amphora.id)
+        stats = self.create_listener_statistics(self.session, self.listener.id)
         with self.session.begin():
             self.session.delete(stats)
             self.session.flush()
         new_stats = self.session.query(models.ListenerStatistics).filter_by(
             listener_id=self.listener.id).first()
         self.assertIsNone(new_stats)
+
+    def test_listener_relationship(self):
+        self.create_listener_statistics(self.session, self.listener.id)
+        new_stats = self.session.query(models.ListenerStatistics).filter_by(
+            listener_id=self.listener.id).first()
+        self.assertIsNotNone(new_stats.listener)
+        self.assertIsInstance(new_stats.listener, models.Listener)
 
 
 class HealthMonitorModelTest(base.OctaviaDBTestBase, ModelTestMixin):
@@ -500,21 +440,15 @@ class HealthMonitorModelTest(base.OctaviaDBTestBase, ModelTestMixin):
 class LoadBalancerModelTest(base.OctaviaDBTestBase, ModelTestMixin):
 
     def test_create(self):
-        load_balancer = self.create_load_balancer(self.session)
-
-        self.assertIsNotNone(load_balancer.created_at)
-        self.assertIsNone(load_balancer.updated_at)
+        self.create_load_balancer(self.session)
 
     def test_update(self):
         load_balancer = self.create_load_balancer(self.session)
-        self.assertIsNone(load_balancer.updated_at)
-
         lb_id = load_balancer.id
-        load_balancer.enabled = False
+        load_balancer.name = 'test1'
         new_load_balancer = self.session.query(
             models.LoadBalancer).filter_by(id=lb_id).first()
-        self.assertFalse(new_load_balancer.enabled)
-        self.assertIsNotNone(new_load_balancer.updated_at)
+        self.assertEqual('test1', new_load_balancer.name)
 
     def test_delete(self):
         load_balancer = self.create_load_balancer(self.session)
@@ -866,8 +800,7 @@ class TestDataModelConversionTest(base.OctaviaDBTestBase, ModelTestMixin):
                                              default_pool_id=self.pool.id,
                                              load_balancer_id=self.lb.id)
         self.stats = self.create_listener_statistics(self.session,
-                                                     self.listener.id,
-                                                     self.amphora.id)
+                                                     self.listener.id)
         self.sni = self.create_sni(self.session, listener_id=self.listener.id)
         self.l7policy = self.create_l7policy(
             self.session, listener_id=self.listener.id,
@@ -888,7 +821,7 @@ class TestDataModelConversionTest(base.OctaviaDBTestBase, ModelTestMixin):
         elif obj.__class__.__name__ in ['SessionPersistence', 'HealthMonitor']:
             return obj.__class__.__name__ + obj.pool_id
         elif obj.__class__.__name__ in ['ListenerStatistics']:
-            return obj.__class__.__name__ + obj.listener_id + obj.amphora_id
+            return obj.__class__.__name__ + obj.listener_id
         elif obj.__class__.__name__ in ['VRRPGroup', 'Vip']:
             return obj.__class__.__name__ + obj.load_balancer_id
         elif obj.__class__.__name__ in ['AmphoraHealth']:
@@ -962,6 +895,9 @@ class TestDataModelConversionTest(base.OctaviaDBTestBase, ModelTestMixin):
         lb_dm = self.session.query(models.LoadBalancer).filter_by(
             id=self.lb.id).first().to_data_model()
         lb_graph_count = self.count_graph_nodes(lb_dm)
+        ls_dm = self.session.query(models.ListenerStatistics).filter_by(
+            listener_id=self.listener.id).first().to_data_model()
+        ls_graph_count = self.count_graph_nodes(ls_dm)
         p_dm = self.session.query(models.Pool).filter_by(
             id=self.pool.id).first().to_data_model()
         p_graph_count = self.count_graph_nodes(p_dm)
@@ -970,6 +906,7 @@ class TestDataModelConversionTest(base.OctaviaDBTestBase, ModelTestMixin):
         mem_graph_count = self.count_graph_nodes(mem_dm)
         self.assertNotEqual(0, lb_graph_count)
         self.assertNotEqual(1, lb_graph_count)
+        self.assertEqual(lb_graph_count, ls_graph_count)
         self.assertEqual(lb_graph_count, p_graph_count)
         self.assertEqual(lb_graph_count, mem_graph_count)
 
@@ -980,7 +917,7 @@ class TestDataModelConversionTest(base.OctaviaDBTestBase, ModelTestMixin):
         # of parent an child relationship.
         lb_id = (lb_dm.listeners[0].default_pool.members[0].pool.
                  session_persistence.pool.health_monitor.pool.listeners[0].
-                 sni_containers[0].listener.load_balancer.
+                 stats.listener.sni_containers[0].listener.load_balancer.
                  listeners[0].load_balancer.pools[0].listeners[0].
                  load_balancer.listeners[0].pools[0].load_balancer.vip.
                  load_balancer.id)
@@ -991,7 +928,7 @@ class TestDataModelConversionTest(base.OctaviaDBTestBase, ModelTestMixin):
         # arbitrary member.
         m_lb_id = (mem_dm.pool.listeners[0].load_balancer.vip.load_balancer.
                    pools[0].session_persistence.pool.health_monitor.pool.
-                   listeners[0].sni_containers[0].listener.
+                   listeners[0].stats.listener.sni_containers[0].listener.
                    load_balancer.pools[0].members[0].pool.load_balancer.id)
         self.assertEqual(lb_dm.id, m_lb_id)
 
@@ -1104,9 +1041,7 @@ class TestDataModelConversionTest(base.OctaviaDBTestBase, ModelTestMixin):
         self.assertIsInstance(stats, data_models.ListenerStatistics)
         self.check_listener_statistics_data_model(stats)
         if check_listener:
-            listener_db = (self.session.query(models.Listener)
-                           .filter_by(id=stats.listener_id).first())
-            self.check_listener(listener_db.to_data_model())
+            self.check_listener(stats.listener, check_statistics=False)
 
     def check_amphora(self, amphora, check_load_balancer=True):
         self.assertIsInstance(amphora, data_models.Amphora)
@@ -1115,7 +1050,8 @@ class TestDataModelConversionTest(base.OctaviaDBTestBase, ModelTestMixin):
             self.check_load_balancer(amphora.load_balancer)
 
     def check_listener(self, listener, check_sni=True, check_pools=True,
-                       check_lb=True, check_l7policies=True):
+                       check_lb=True, check_statistics=True,
+                       check_l7policies=True):
         self.assertIsInstance(listener, data_models.Listener)
         self.check_listener_data_model(listener)
         if check_lb:
@@ -1130,6 +1066,9 @@ class TestDataModelConversionTest(base.OctaviaDBTestBase, ModelTestMixin):
         if check_pools:
             for pool in listener.pools:
                 self.check_pool(pool, check_listeners=False, check_lb=check_lb)
+        if check_statistics:
+            self.check_listener_statistics(listener.stats,
+                                           check_listener=False)
         if check_l7policies:
             c_l7policies = listener.l7policies
             self.assertIsInstance(c_l7policies, list)
@@ -1318,8 +1257,7 @@ class TestDataModelManipulations(base.OctaviaDBTestBase, ModelTestMixin):
                                              default_pool_id=self.pool.id,
                                              load_balancer_id=self.lb.id)
         self.stats = self.create_listener_statistics(self.session,
-                                                     self.listener.id,
-                                                     self.amphora.id)
+                                                     self.listener.id)
         self.sni = self.create_sni(self.session, listener_id=self.listener.id)
         self.l7policy = self.create_l7policy(
             self.session, listener_id=self.listener.id,
@@ -1356,6 +1294,12 @@ class TestDataModelManipulations(base.OctaviaDBTestBase, ModelTestMixin):
         pool = sp.pool
         sp.delete()
         self.assertIsNone(pool.session_persistence)
+
+    def test_dm_listener_statistics_delete(self):
+        stats = self.stats.to_data_model()
+        listener = stats.listener
+        stats.delete()
+        self.assertIsNone(listener.stats)
 
     def test_dm_health_monitor_delete(self):
         hm = self.hm.to_data_model()

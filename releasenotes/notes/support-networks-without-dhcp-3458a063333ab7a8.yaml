@@ -1,5 +1,0 @@
----
-features:
-  - Adds support for networks that do not have DHCP services enabled.
-upgrade:
-  - To support networks without DHCP you must upgrade your amphora image.

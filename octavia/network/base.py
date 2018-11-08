@@ -63,19 +63,15 @@ class SubnetNotFound(NetworkException):
     pass
 
 
+class VIPConfigurationNotFound(NetworkException):
+    pass
+
+
 class AmphoraNotFound(NetworkException):
     pass
 
 
 class PluggedVIPNotFound(NetworkException):
-    pass
-
-
-class TimeoutException(NetworkException):
-    pass
-
-
-class QosPolicyNotFound(NetworkException):
     pass
 
 
@@ -176,7 +172,7 @@ class AbstractNetworkDriver(object):
         :return: [octavia.network.data_models.Instance]
         """
 
-    def update_vip(self, load_balancer, for_delete):
+    def update_vip(self, load_balancer):
         """Hook for the driver to update the VIP information.
 
         This method will be called upon the change of a load_balancer
@@ -185,8 +181,6 @@ class AbstractNetworkDriver(object):
         state of the passed in load_balancer.
 
         :param load_balancer: octavia.common.data_models.LoadBalancer instance
-        :param for_delete: Boolean indicating if this update is for a delete
-        :raises: MissingVIPSecurityGroup
         :return: None
         """
         pass
@@ -222,47 +216,6 @@ class AbstractNetworkDriver(object):
         pass
 
     @abc.abstractmethod
-    def get_network_by_name(self, network_name):
-        """Retrieves network from network name.
-
-        :param network_name: name of a network to retrieve
-        :return: octavia.network.data_models.Network
-        :raises: NetworkException, NetworkNotFound
-        """
-        pass
-
-    @abc.abstractmethod
-    def get_subnet_by_name(self, subnet_name):
-        """Retrieves subnet from subnet name.
-
-        :param subnet_name: name of a subnet to retrieve
-        :return: octavia.network.data_models.Subnet
-        :raises: NetworkException, SubnetNotFound
-        """
-        pass
-
-    @abc.abstractmethod
-    def get_port_by_name(self, port_name):
-        """Retrieves port from port name.
-
-        :param port_name: name of a port to retrieve
-        :return: octavia.network.data_models.Port
-        :raises: NetworkException, PortNotFound
-        """
-        pass
-
-    @abc.abstractmethod
-    def get_port_by_net_id_device_id(self, network_id, device_id):
-        """Retrieves port from network id and device id.
-
-        :param network_id: id of a network to filter by
-        :param device_id: id of a network device to filter by
-        :return: octavia.network.data_models.Port
-        :raises: NetworkException, PortNotFound
-        """
-        pass
-
-    @abc.abstractmethod
     def failover_preparation(self, amphora):
         """Prepare an amphora for failover.
 
@@ -273,48 +226,12 @@ class AbstractNetworkDriver(object):
         pass
 
     @abc.abstractmethod
-    def plug_port(self, amphora, port):
+    def plug_port(self, compute_id, port):
         """Plug a neutron port in to a compute instance
 
-        :param amphora: amphora object to plug the port into
+        :param compute_id: id of an amphora in the compute service
         :param port: port to plug into the compute instance
         :return: None
         :raises: PlugNetworkException, AmphoraNotFound, NetworkNotFound
-        """
-        pass
-
-    @abc.abstractmethod
-    def get_network_configs(self, load_balancer):
-        """Retrieve network configurations
-
-        This method assumes that a dictionary of AmphoraNetworkConfigs keyed
-        off of the related amphora id are returned.
-        The configs contain data pertaining to each amphora that is later
-        used for finalization of the entire load balancer configuration.
-        The data provided to these configs is left up to the driver, this
-        means the driver is responsible for providing data that is appropriate
-        for the amphora network configurations.
-
-        Example return: {<amphora.id>: <AmphoraNetworkConfig>}
-
-        :param load_balancer: The load_balancer configuration
-        :return: dict of octavia.network.data_models.AmphoraNetworkConfig
-                 keyed off of the amphora id the config is associated with.
-        :raises: NotFound, NetworkNotFound, SubnetNotFound, PortNotFound
-        """
-        pass
-
-    @abc.abstractmethod
-    def wait_for_port_detach(self, amphora):
-        """Waits for the amphora ports device_id to be unset.
-
-        This method waits for the ports on an amphora device_id
-        parameter to be '' or None which signifies that nova has
-        finished detaching the port from the instance.
-
-        :param amphora: Amphora to wait for ports to detach.
-        :returns: None
-        :raises TimeoutException: Port did not detach in interval.
-        :raises PortNotFound: Port was not found by neutron.
         """
         pass

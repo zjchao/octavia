@@ -12,45 +12,59 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from barbicanclient.v1 import containers
-from barbicanclient.v1 import secrets
+from barbicanclient import client as barbican_client
 import mock
-import six
 
 import octavia.certificates.common.barbican as barbican_common
 import octavia.tests.unit.base as base
-import octavia.tests.unit.common.sample_configs.sample_certs as sample
+
+X509_IMDS = """-----BEGIN CERTIFICATE-----
+First Intermediate Data
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+Second Intermediate Data
+-----END CERTIFICATE-----"""
+
+X509_IMDS_LIST = [
+    """-----BEGIN CERTIFICATE-----
+First Intermediate Data
+-----END CERTIFICATE-----""",
+    """-----BEGIN CERTIFICATE-----
+Second Intermediate Data
+-----END CERTIFICATE-----"""
+]
 
 
 class TestBarbicanCert(base.TestCase):
 
-    def _prepare(self):
-        self.certificate_secret = secrets.Secret(
+    def setUp(self):
+        # Certificate data
+        self.certificate = "My Certificate"
+        self.intermediates = X509_IMDS_LIST
+        self.private_key = "My Private Key"
+        self.private_key_passphrase = "My Private Key Passphrase"
+
+        self.certificate_secret = barbican_client.secrets.Secret(
             api=mock.MagicMock(),
             payload=self.certificate
         )
-        self.intermediates_secret = secrets.Secret(
+        self.intermediates_secret = barbican_client.secrets.Secret(
             api=mock.MagicMock(),
-            payload=sample.X509_IMDS
+            payload=X509_IMDS
         )
-        self.private_key_secret = secrets.Secret(
+        self.private_key_secret = barbican_client.secrets.Secret(
             api=mock.MagicMock(),
             payload=self.private_key
         )
-        self.private_key_passphrase_secret = secrets.Secret(
+        self.private_key_passphrase_secret = barbican_client.secrets.Secret(
             api=mock.MagicMock(),
             payload=self.private_key_passphrase
         )
 
+        super(TestBarbicanCert, self).setUp()
+
     def test_barbican_cert(self):
-        # Certificate data
-        self.certificate = six.binary_type(sample.X509_CERT)
-        self.intermediates = sample.X509_IMDS_LIST
-        self.private_key = six.binary_type(sample.X509_CERT_KEY_ENCRYPTED)
-        self.private_key_passphrase = sample.X509_CERT_KEY_PASSPHRASE
-        self._prepare()
-
-        container = containers.CertificateContainer(
+        container = barbican_client.containers.CertificateContainer(
             api=mock.MagicMock(),
             certificate=self.certificate_secret,
             intermediates=self.intermediates_secret,
@@ -63,39 +77,8 @@ class TestBarbicanCert(base.TestCase):
         )
 
         # Validate the cert functions
-        self.assertEqual(cert.get_certificate(), sample.X509_CERT)
-        self.assertEqual(cert.get_intermediates(), sample.X509_IMDS_LIST)
-        self.assertEqual(cert.get_private_key(),
-                         sample.X509_CERT_KEY_ENCRYPTED)
+        self.assertEqual(cert.get_certificate(), self.certificate)
+        self.assertEqual(cert.get_intermediates(), self.intermediates)
+        self.assertEqual(cert.get_private_key(), self.private_key)
         self.assertEqual(cert.get_private_key_passphrase(),
-                         six.b(sample.X509_CERT_KEY_PASSPHRASE))
-
-    def test_barbican_cert_text(self):
-        # Certificate data
-        self.certificate = six.text_type(sample.X509_CERT)
-        self.intermediates = six.text_type(sample.X509_IMDS_LIST)
-        self.private_key = six.text_type(sample.X509_CERT_KEY_ENCRYPTED)
-        self.private_key_passphrase = six.text_type(
-            sample.X509_CERT_KEY_PASSPHRASE)
-        self._prepare()
-
-        container = containers.CertificateContainer(
-            api=mock.MagicMock(),
-            certificate=self.certificate_secret,
-            intermediates=self.intermediates_secret,
-            private_key=self.private_key_secret,
-            private_key_passphrase=self.private_key_passphrase_secret
-        )
-        # Create a cert
-        cert = barbican_common.BarbicanCert(
-            cert_container=container
-        )
-
-        # Validate the cert functions
-        self.assertEqual(cert.get_certificate(),
-                         six.b(six.text_type(sample.X509_CERT)))
-        self.assertEqual(cert.get_intermediates(), sample.X509_IMDS_LIST)
-        self.assertEqual(cert.get_private_key(), six.b(six.text_type(
-            sample.X509_CERT_KEY_ENCRYPTED)))
-        self.assertEqual(cert.get_private_key_passphrase(),
-                         six.b(sample.X509_CERT_KEY_PASSPHRASE))
+                         self.private_key_passphrase)

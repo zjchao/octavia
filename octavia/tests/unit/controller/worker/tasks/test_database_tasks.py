@@ -35,7 +35,6 @@ SERVER_GROUP_ID = uuidutils.generate_uuid()
 LB_NET_IP = '192.0.2.2'
 LISTENER_ID = uuidutils.generate_uuid()
 POOL_ID = uuidutils.generate_uuid()
-HM_ID = uuidutils.generate_uuid()
 MEMBER_ID = uuidutils.generate_uuid()
 PORT_ID = uuidutils.generate_uuid()
 SUBNET_ID = uuidutils.generate_uuid()
@@ -49,8 +48,6 @@ HA_IP = '192.0.5.4'
 AMP_ROLE = 'FAKE_ROLE'
 VRRP_ID = random.randrange(255)
 VRRP_PRIORITY = random.randrange(100)
-CACHED_ZONE = 'zone1'
-IMAGE_ID = uuidutils.generate_uuid()
 
 _amphora_mock = mock.MagicMock()
 _amphora_mock.id = AMP_ID
@@ -118,10 +115,6 @@ zfJ3Bo+P7In9fsHbyDAqIhMwDQYJKoZIhvcNAQELBQADQQBenkZ2k7RgZqgj+dxA
 D7BF8MN1oUAOpyYqAjkGddSEuMyNmwtHKZI1dyQ0gBIQdiU9yAG2oTbUIK4msbBV
 uJIQ
 -----END CERTIFICATE-----"""
-_compute_mock = mock.MagicMock()
-_compute_mock.lb_network_ip = LB_NET_IP
-_compute_mock.cached_zone = CACHED_ZONE
-_compute_mock.image_id = IMAGE_ID
 
 
 @mock.patch('octavia.db.repositories.AmphoraRepository.delete')
@@ -136,7 +129,6 @@ class TestDatabaseTasks(base.TestCase):
     def setUp(self):
 
         self.health_mon_mock = mock.MagicMock()
-        self.health_mon_mock.id = HM_ID
         self.health_mon_mock.pool_id = POOL_ID
 
         self.listener_mock = mock.MagicMock()
@@ -150,7 +142,6 @@ class TestDatabaseTasks(base.TestCase):
 
         self.pool_mock = mock.MagicMock()
         self.pool_mock.id = POOL_ID
-        self.pool_mock.health_monitor = self.health_mon_mock
 
         self.l7policy_mock = mock.MagicMock()
         self.l7policy_mock.id = L7POLICY_ID
@@ -182,27 +173,24 @@ class TestDatabaseTasks(base.TestCase):
             status=constants.PENDING_CREATE,
             cert_busy=False)
 
-        self.assertEqual(_amphora_mock.id, amp_id)
+        assert(amp_id == _amphora_mock.id)
 
         # Test the revert
-        create_amp_in_db.revert(_tf_failure_mock)
-        self.assertFalse(mock_amphora_repo_delete.called)
 
-        mock_amphora_repo_delete.reset_mock()
-        create_amp_in_db.revert(result='AMP')
-        self.assertTrue(mock_amphora_repo_delete.called)
-        mock_amphora_repo_delete.assert_called_once_with(
-            'TEST',
-            id='AMP')
+# TODO(johnsom) finish when this method is updated
+        amp = create_amp_in_db.revert(_tf_failure_mock)
 
-        # Test revert with exception
-        mock_amphora_repo_delete.reset_mock()
-        mock_amphora_repo_delete.side_effect = Exception('fail')
-        create_amp_in_db.revert(result='AMP')
-        self.assertTrue(mock_amphora_repo_delete.called)
-        mock_amphora_repo_delete.assert_called_once_with(
-            'TEST',
-            id='AMP')
+        self.assertIsNone(amp)
+
+        amp = create_amp_in_db.revert(result='TEST')
+
+        self.assertIsNone(amp)
+
+#        repo.AmphoraRepository.update.assert_called_once_with(
+#            'TEST',
+#            AMP_ID,
+#            status=constants.ERROR,
+#            compute_id=COMPUTE_ID)
 
     @mock.patch('octavia.db.repositories.ListenerRepository.delete')
     def test_delete_listener_in_db(self,
@@ -222,11 +210,9 @@ class TestDatabaseTasks(base.TestCase):
             'TEST',
             id=LISTENER_ID)
 
-    @mock.patch('octavia.db.repositories.HealthMonitorRepository.update')
     @mock.patch('octavia.db.repositories.HealthMonitorRepository.delete')
     def test_delete_health_monitor_in_db(self,
                                          mock_health_mon_repo_delete,
-                                         mock_health_mon_repo_update,
                                          mock_generate_uuid,
                                          mock_LOG,
                                          mock_get_session,
@@ -236,31 +222,29 @@ class TestDatabaseTasks(base.TestCase):
                                          mock_amphora_repo_delete):
 
         delete_health_mon = database_tasks.DeleteHealthMonitorInDB()
-        delete_health_mon.execute(self.health_mon_mock)
+        delete_health_mon.execute(POOL_ID)
 
         repo.HealthMonitorRepository.delete.assert_called_once_with(
-            'TEST', id=HM_ID)
+            'TEST',
+            pool_id=POOL_ID)
 
         # Test the revert
-        mock_health_mon_repo_delete.reset_mock()
-        delete_health_mon.revert(self.health_mon_mock)
 
-        repo.HealthMonitorRepository.update.assert_called_once_with(
-            'TEST', id=HM_ID, provisioning_status=constants.ERROR)
+        mock_health_mon_repo_delete.reset_mock()
+        delete_health_mon.revert(POOL_ID)
 
         # Test Not Found Exception
         mock_health_mon_repo_delete.reset_mock()
         mock_health_mon_repo_delete.side_effect = [exc.NoResultFound()]
-        delete_health_mon.execute(self.health_mon_mock)
+        delete_health_mon.execute(POOL_ID)
 
         repo.HealthMonitorRepository.delete.assert_called_once_with(
-            'TEST', id=HM_ID)
+            'TEST',
+            pool_id=POOL_ID)
 
-    @mock.patch('octavia.db.repositories.HealthMonitorRepository.update')
     @mock.patch('octavia.db.repositories.HealthMonitorRepository.delete')
     def test_delete_health_monitor_in_db_by_pool(self,
                                                  mock_health_mon_repo_delete,
-                                                 mock_health_mon_repo_update,
                                                  mock_generate_uuid,
                                                  mock_LOG,
                                                  mock_get_session,
@@ -274,14 +258,12 @@ class TestDatabaseTasks(base.TestCase):
 
         repo.HealthMonitorRepository.delete.assert_called_once_with(
             'TEST',
-            id=HM_ID)
+            pool_id=POOL_ID)
 
         # Test the revert
+
         mock_health_mon_repo_delete.reset_mock()
         delete_health_mon.revert(self.pool_mock)
-
-        repo.HealthMonitorRepository.update.assert_called_once_with(
-            'TEST', id=HM_ID, provisioning_status=constants.ERROR)
 
 # TODO(johnsom) fix once provisioning status added
 #        repo.HealthMonitorRepository.update.assert_called_once_with(
@@ -338,7 +320,7 @@ class TestDatabaseTasks(base.TestCase):
         # Test the revert
 
         mock_pool_repo_delete.reset_mock()
-        delete_pool.revert(_pool_mock)
+        delete_pool.revert(POOL_ID)
 
 # TODO(johnsom) Fix
 #        repo.PoolRepository.update.assert_called_once_with(
@@ -367,7 +349,7 @@ class TestDatabaseTasks(base.TestCase):
         # Test the revert
 
         mock_l7policy_repo_delete.reset_mock()
-        delete_l7policy.revert(_l7policy_mock)
+        delete_l7policy.revert(L7POLICY_ID)
 
 # TODO(sbalukoff) Fix
 #        repo.ListenerRepository.update.assert_called_once_with(
@@ -396,7 +378,7 @@ class TestDatabaseTasks(base.TestCase):
         # Test the revert
 
         mock_l7rule_repo_delete.reset_mock()
-        delete_l7rule.revert(_l7rule_mock)
+        delete_l7rule.revert(L7RULE_ID)
 
 # TODO(sbalukoff) Fix
 #        repo.ListenerRepository.update.assert_called_once_with(
@@ -512,7 +494,9 @@ class TestDatabaseTasks(base.TestCase):
             ha_ip=HA_IP,
             vrrp_port_id=VRRP_PORT_ID,
             ha_port_id=HA_PORT_ID,
-            vrrp_id=VRRP_ID)
+            role=AMP_ROLE,
+            vrrp_id=VRRP_ID,
+            vrrp_priority=VRRP_PRIORITY)
 
     @mock.patch('octavia.db.repositories.AmphoraRepository.associate')
     def test_associate_failover_amphora_with_lb_id(
@@ -534,16 +518,6 @@ class TestDatabaseTasks(base.TestCase):
                                                amphora_id=AMP_ID)
 
         # Test revert
-        assoc_fo_amp_lb_id.revert(AMP_ID)
-
-        mock_amphora_repo_update.assert_called_once_with('TEST',
-                                                         AMP_ID,
-                                                         loadbalancer_id=None)
-
-        # Test revert with exception
-        mock_amphora_repo_update.reset_mock()
-        mock_amphora_repo_update.side_effect = Exception('fail')
-
         assoc_fo_amp_lb_id.revert(AMP_ID)
 
         mock_amphora_repo_update.assert_called_once_with('TEST',
@@ -575,22 +549,6 @@ class TestDatabaseTasks(base.TestCase):
         amp_id = map_lb_to_amp.execute(self.loadbalancer_mock.id)
 
         self.assertIsNone(amp_id)
-
-        # Test revert
-        map_lb_to_amp.revert(None, self.loadbalancer_mock.id)
-        repo.LoadBalancerRepository.update.assert_called_once_with(
-            'TEST',
-            id=LB_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test revert with exception
-        repo.LoadBalancerRepository.update.reset_mock()
-        mock_loadbalancer_repo_update.side_effect = Exception('fail')
-        map_lb_to_amp.revert(None, self.loadbalancer_mock.id)
-        repo.LoadBalancerRepository.update.assert_called_once_with(
-            'TEST',
-            id=LB_ID,
-            provisioning_status=constants.ERROR)
 
     @mock.patch('octavia.db.repositories.AmphoraRepository.get',
                 return_value=_amphora_mock)
@@ -652,19 +610,7 @@ class TestDatabaseTasks(base.TestCase):
 
         repo.AmphoraRepository.update.assert_called_once_with(
             'TEST',
-            id=AMP_ID,
-            status=constants.ERROR)
-
-        # Test the revert with exception
-
-        mock_amphora_repo_update.reset_mock()
-        mock_amphora_repo_update.side_effect = Exception('fail')
-        mark_amp_allocated_in_db.revert(None, _amphora_mock,
-                                        self.loadbalancer_mock.id)
-
-        repo.AmphoraRepository.update.assert_called_once_with(
-            'TEST',
-            id=AMP_ID,
+            AMP_ID,
             status=constants.ERROR)
 
     def test_mark_amphora_booting_in_db(self,
@@ -698,19 +644,6 @@ class TestDatabaseTasks(base.TestCase):
             status=constants.ERROR,
             compute_id=COMPUTE_ID)
 
-        # Test the revert with exception
-
-        mock_amphora_repo_update.reset_mock()
-        mock_amphora_repo_update.side_effect = Exception('fail')
-        mark_amp_booting_in_db.revert(None, _amphora_mock.id,
-                                      _amphora_mock.compute_id)
-
-        repo.AmphoraRepository.update.assert_called_once_with(
-            'TEST',
-            AMP_ID,
-            status=constants.ERROR,
-            compute_id=COMPUTE_ID)
-
     def test_mark_amphora_deleted_in_db(self,
                                         mock_generate_uuid,
                                         mock_LOG,
@@ -729,22 +662,13 @@ class TestDatabaseTasks(base.TestCase):
             status=constants.DELETED)
 
         # Test the revert
+
         mock_amphora_repo_update.reset_mock()
         mark_amp_deleted_in_db.revert(_amphora_mock)
 
         repo.AmphoraRepository.update.assert_called_once_with(
             'TEST',
-            id=AMP_ID,
-            status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_amphora_repo_update.reset_mock()
-        mock_amphora_repo_update.side_effect = Exception('fail')
-        mark_amp_deleted_in_db.revert(_amphora_mock)
-
-        repo.AmphoraRepository.update.assert_called_once_with(
-            'TEST',
-            id=AMP_ID,
+            AMP_ID,
             status=constants.ERROR)
 
     def test_mark_amphora_pending_delete_in_db(self,
@@ -766,23 +690,13 @@ class TestDatabaseTasks(base.TestCase):
             status=constants.PENDING_DELETE)
 
         # Test the revert
+
         mock_amphora_repo_update.reset_mock()
         mark_amp_pending_delete_in_db.revert(_amphora_mock)
 
         repo.AmphoraRepository.update.assert_called_once_with(
             'TEST',
-            id=AMP_ID,
-            status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_amphora_repo_update.reset_mock()
-        mock_amphora_repo_update.side_effect = Exception('fail')
-
-        mark_amp_pending_delete_in_db.revert(_amphora_mock)
-
-        repo.AmphoraRepository.update.assert_called_once_with(
-            'TEST',
-            id=AMP_ID,
+            AMP_ID,
             status=constants.ERROR)
 
     def test_mark_amphora_pending_update_in_db(self,
@@ -804,22 +718,13 @@ class TestDatabaseTasks(base.TestCase):
             status=constants.PENDING_UPDATE)
 
         # Test the revert
+
         mock_amphora_repo_update.reset_mock()
         mark_amp_pending_update_in_db.revert(_amphora_mock)
 
         repo.AmphoraRepository.update.assert_called_once_with(
             'TEST',
-            id=AMP_ID,
-            status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_amphora_repo_update.reset_mock()
-        mock_amphora_repo_update.side_effect = Exception('fail')
-        mark_amp_pending_update_in_db.revert(_amphora_mock)
-
-        repo.AmphoraRepository.update.assert_called_once_with(
-            'TEST',
-            id=AMP_ID,
+            AMP_ID,
             status=constants.ERROR)
 
     def test_mark_amphora_ready_in_db(self,
@@ -855,44 +760,6 @@ class TestDatabaseTasks(base.TestCase):
             compute_id=COMPUTE_ID,
             lb_network_ip=LB_NET_IP)
 
-        # Test the revert with exception
-
-        mock_amphora_repo_update.reset_mock()
-        mock_amphora_repo_update.side_effect = Exception('fail')
-        mark_amp_ready_in_db.revert(_amphora_mock)
-
-        repo.AmphoraRepository.update.assert_called_once_with(
-            'TEST',
-            AMP_ID,
-            status=constants.ERROR,
-            compute_id=COMPUTE_ID,
-            lb_network_ip=LB_NET_IP)
-
-    @mock.patch('octavia.db.repositories.AmphoraRepository.get')
-    def test_update_amphora_info(self,
-                                 mock_amphora_repo_get,
-                                 mock_generate_uuid,
-                                 mock_LOG,
-                                 mock_get_session,
-                                 mock_loadbalancer_repo_update,
-                                 mock_listener_repo_update,
-                                 mock_amphora_repo_update,
-                                 mock_amphora_repo_delete):
-
-        update_amphora_info = database_tasks.UpdateAmphoraInfo()
-        update_amphora_info.execute(AMP_ID, _compute_mock)
-
-        repo.AmphoraRepository.update.assert_called_once_with(
-            'TEST',
-            AMP_ID,
-            lb_network_ip=LB_NET_IP,
-            cached_zone=CACHED_ZONE,
-            image_id=IMAGE_ID)
-
-        repo.AmphoraRepository.get.assert_called_once_with(
-            'TEST',
-            id=AMP_ID)
-
     def test_mark_listener_active_in_db(self,
                                         mock_generate_uuid,
                                         mock_LOG,
@@ -911,22 +778,13 @@ class TestDatabaseTasks(base.TestCase):
             provisioning_status=constants.ACTIVE)
 
         # Test the revert
+
         mock_listener_repo_update.reset_mock()
         mark_listener_active.revert(self.listener_mock)
 
         repo.ListenerRepository.update.assert_called_once_with(
             'TEST',
-            id=LISTENER_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert
-        mock_listener_repo_update.reset_mock()
-        mock_listener_repo_update.side_effect = Exception('fail')
-        mark_listener_active.revert(self.listener_mock)
-
-        repo.ListenerRepository.update.assert_called_once_with(
-            'TEST',
-            id=LISTENER_ID,
+            LISTENER_ID,
             provisioning_status=constants.ERROR)
 
     def test_mark_listener_deleted_in_db(self,
@@ -947,22 +805,13 @@ class TestDatabaseTasks(base.TestCase):
             provisioning_status=constants.DELETED)
 
         # Test the revert
+
         mock_listener_repo_update.reset_mock()
         mark_listener_deleted.revert(self.listener_mock)
 
         repo.ListenerRepository.update.assert_called_once_with(
             'TEST',
-            id=LISTENER_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_listener_repo_update.reset_mock()
-        mock_listener_repo_update.side_effect = Exception('fail')
-        mark_listener_deleted.revert(self.listener_mock)
-
-        repo.ListenerRepository.update.assert_called_once_with(
-            'TEST',
-            id=LISTENER_ID,
+            LISTENER_ID,
             provisioning_status=constants.ERROR)
 
     def test_mark_listener_pending_deleted_in_db(self,
@@ -984,22 +833,13 @@ class TestDatabaseTasks(base.TestCase):
             provisioning_status=constants.PENDING_DELETE)
 
         # Test the revert
+
         mock_listener_repo_update.reset_mock()
         mark_listener_pending_delete.revert(self.listener_mock)
 
         repo.ListenerRepository.update.assert_called_once_with(
             'TEST',
-            id=LISTENER_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_listener_repo_update.reset_mock()
-        mock_listener_repo_update.side_effect = Exception('fail')
-        mark_listener_pending_delete.revert(self.listener_mock)
-
-        repo.ListenerRepository.update.assert_called_once_with(
-            'TEST',
-            id=LISTENER_ID,
+            LISTENER_ID,
             provisioning_status=constants.ERROR)
 
     def test_mark_lb_and_listeners_active_in_db(self,
@@ -1026,6 +866,7 @@ class TestDatabaseTasks(base.TestCase):
             provisioning_status=constants.ACTIVE)
 
         # Test the revert
+
         mock_loadbalancer_repo_update.reset_mock()
         mock_listener_repo_update.reset_mock()
 
@@ -1034,29 +875,11 @@ class TestDatabaseTasks(base.TestCase):
 
         repo.ListenerRepository.update.assert_called_once_with(
             'TEST',
-            id=LISTENER_ID,
+            LISTENER_ID,
             provisioning_status=constants.ERROR)
         repo.LoadBalancerRepository.update.assert_called_once_with(
             'TEST',
-            id=LB_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exceptions
-        mock_loadbalancer_repo_update.reset_mock()
-        mock_loadbalancer_repo_update.side_effect = Exception('fail')
-        mock_listener_repo_update.reset_mock()
-        mock_listener_repo_update.side_effect = Exception('fail')
-
-        mark_lb_and_listeners_active.revert(self.loadbalancer_mock,
-                                            [self.listener_mock])
-
-        repo.ListenerRepository.update.assert_called_once_with(
-            'TEST',
-            id=LISTENER_ID,
-            provisioning_status=constants.ERROR)
-        repo.LoadBalancerRepository.update.assert_called_once_with(
-            'TEST',
-            id=LB_ID,
+            LB_ID,
             provisioning_status=constants.ERROR)
 
     @mock.patch('octavia.common.tls_utils.cert_parser.get_cert_expiration',
@@ -1113,23 +936,13 @@ class TestDatabaseTasks(base.TestCase):
         self.assertEqual(0, repo.ListenerRepository.update.call_count)
 
         # Test the revert
+
         mock_loadbalancer_repo_update.reset_mock()
         mark_loadbalancer_active.revert(self.loadbalancer_mock)
 
         repo.LoadBalancerRepository.update.assert_called_once_with(
             'TEST',
-            id=LB_ID,
-            provisioning_status=constants.ERROR)
-        self.assertEqual(0, repo.ListenerRepository.update.call_count)
-
-        # Test the revert with exception
-        mock_loadbalancer_repo_update.reset_mock()
-        mock_loadbalancer_repo_update.side_effect = Exception('fail')
-        mark_loadbalancer_active.revert(self.loadbalancer_mock)
-
-        repo.LoadBalancerRepository.update.assert_called_once_with(
-            'TEST',
-            id=LB_ID,
+            LB_ID,
             provisioning_status=constants.ERROR)
         self.assertEqual(0, repo.ListenerRepository.update.call_count)
 
@@ -1144,7 +957,7 @@ class TestDatabaseTasks(base.TestCase):
         listeners = [data_models.Listener(id='listener1'),
                      data_models.Listener(id='listener2')]
         lb = data_models.LoadBalancer(id=LB_ID, listeners=listeners)
-        mark_lb_active = database_tasks.MarkLBActiveInDB(mark_subobjects=True)
+        mark_lb_active = database_tasks.MarkLBActiveInDB(mark_listeners=True)
         mark_lb_active.execute(lb)
 
         repo.LoadBalancerRepository.update.assert_called_once_with(
@@ -1164,147 +977,13 @@ class TestDatabaseTasks(base.TestCase):
 
         repo.LoadBalancerRepository.update.assert_called_once_with(
             'TEST',
-            id=lb.id,
-            provisioning_status=constants.ERROR)
-        self.assertEqual(2, repo.ListenerRepository.update.call_count)
-        repo.ListenerRepository.update.has_calls(
-            [mock.call('TEST', listeners[0].id,
-                       provisioning_status=constants.ERROR),
-             mock.call('TEST', listeners[1].id,
-                       provisioning_status=constants.ERROR)])
-
-    @mock.patch('octavia.db.repositories.PoolRepository.update')
-    @mock.patch('octavia.db.repositories.MemberRepository.update')
-    @mock.patch('octavia.db.repositories.HealthMonitorRepository.update')
-    @mock.patch('octavia.db.repositories.L7PolicyRepository.update')
-    @mock.patch('octavia.db.repositories.L7RuleRepository.update')
-    def test_mark_LB_active_in_db_full_graph(self,
-                                             mock_l7r_repo_update,
-                                             mock_l7p_repo_update,
-                                             mock_hm_repo_update,
-                                             mock_member_repo_update,
-                                             mock_pool_repo_update,
-                                             mock_generate_uuid,
-                                             mock_LOG,
-                                             mock_get_session,
-                                             mock_loadbalancer_repo_update,
-                                             mock_listener_repo_update,
-                                             mock_amphora_repo_update,
-                                             mock_amphora_repo_delete):
-        unused_pool = data_models.Pool(id='unused_pool')
-        members1 = [data_models.Member(id='member1'),
-                    data_models.Member(id='member2')]
-        health_monitor = data_models.HealthMonitor(id='hm1')
-        default_pool = data_models.Pool(id='default_pool',
-                                        members=members1,
-                                        health_monitor=health_monitor)
-        listener1 = data_models.Listener(id='listener1',
-                                         default_pool=default_pool)
-        members2 = [data_models.Member(id='member3'),
-                    data_models.Member(id='member4')]
-        redirect_pool = data_models.Pool(id='redirect_pool',
-                                         members=members2)
-        l7rules = [data_models.L7Rule(id='rule1')]
-        redirect_policy = data_models.L7Policy(id='redirect_policy',
-                                               redirect_pool=redirect_pool,
-                                               l7rules=l7rules)
-        l7policies = [redirect_policy]
-        listener2 = data_models.Listener(id='listener2',
-                                         l7policies=l7policies)
-        listener2.l7policies = l7policies
-        listeners = [listener1, listener2]
-        pools = [default_pool, redirect_pool, unused_pool]
-
-        lb = data_models.LoadBalancer(id=LB_ID, listeners=listeners,
-                                      pools=pools)
-        mark_lb_active = database_tasks.MarkLBActiveInDB(mark_subobjects=True)
-        mark_lb_active.execute(lb)
-
-        repo.LoadBalancerRepository.update.assert_called_once_with(
-            'TEST',
             lb.id,
-            provisioning_status=constants.ACTIVE)
-        self.assertEqual(2, repo.ListenerRepository.update.call_count)
-        repo.ListenerRepository.update.has_calls(
-            [mock.call('TEST', listeners[0].id,
-                       provisioning_status=constants.ACTIVE),
-             mock.call('TEST', listeners[1].id,
-                       provisioning_status=constants.ACTIVE)])
-        self.assertEqual(2, repo.PoolRepository.update.call_count)
-        repo.PoolRepository.update.has_calls(
-            [mock.call('TEST', default_pool.id,
-                       provisioning_status=constants.ACTIVE),
-             mock.call('TEST', redirect_pool.id,
-                       provisioning_status=constants.ACTIVE)])
-        self.assertEqual(4, repo.MemberRepository.update.call_count)
-        repo.MemberRepository.update.has_calls(
-            [mock.call('TEST', members1[0].id,
-                       provisioning_status=constants.ACTIVE),
-             mock.call('TEST', members1[1].id,
-                       provisioning_status=constants.ACTIVE),
-             mock.call('TEST', members2[0].id,
-                       provisioning_status=constants.ACTIVE),
-             mock.call('TEST', members2[1].id,
-                       provisioning_status=constants.ACTIVE)])
-        self.assertEqual(1, repo.HealthMonitorRepository.update.call_count)
-        repo.HealthMonitorRepository.update.has_calls(
-            [mock.call('TEST', health_monitor.id,
-                       provisioning_status=constants.ACTIVE)])
-        self.assertEqual(1, repo.L7PolicyRepository.update.call_count)
-        repo.L7PolicyRepository.update.has_calls(
-            [mock.call('TEST', l7policies[0].id,
-                       provisioning_status=constants.ACTIVE)])
-        self.assertEqual(1, repo.L7RuleRepository.update.call_count)
-        repo.L7RuleRepository.update.has_calls(
-            [mock.call('TEST', l7rules[0].id,
-                       provisioning_status=constants.ACTIVE)])
-
-        mock_loadbalancer_repo_update.reset_mock()
-        mock_listener_repo_update.reset_mock()
-        mock_pool_repo_update.reset_mock()
-        mock_member_repo_update.reset_mock()
-        mock_hm_repo_update.reset_mock()
-        mock_l7p_repo_update.reset_mock()
-        mock_l7r_repo_update.reset_mock()
-        mark_lb_active.revert(lb)
-
-        repo.LoadBalancerRepository.update.assert_called_once_with(
-            'TEST',
-            id=lb.id,
             provisioning_status=constants.ERROR)
         self.assertEqual(2, repo.ListenerRepository.update.call_count)
         repo.ListenerRepository.update.has_calls(
             [mock.call('TEST', listeners[0].id,
                        provisioning_status=constants.ERROR),
              mock.call('TEST', listeners[1].id,
-                       provisioning_status=constants.ERROR)])
-        self.assertEqual(2, repo.PoolRepository.update.call_count)
-        repo.PoolRepository.update.has_calls(
-            [mock.call('TEST', default_pool.id,
-                       provisioning_status=constants.ERROR),
-             mock.call('TEST', redirect_pool.id,
-                       provisioning_status=constants.ERROR)])
-        self.assertEqual(4, repo.MemberRepository.update.call_count)
-        repo.MemberRepository.update.has_calls(
-            [mock.call('TEST', members1[0].id,
-                       provisioning_status=constants.ERROR),
-             mock.call('TEST', members1[1].id,
-                       provisioning_status=constants.ERROR),
-             mock.call('TEST', members2[0].id,
-                       provisioning_status=constants.ERROR),
-             mock.call('TEST', members2[1].id,
-                       provisioning_status=constants.ERROR)])
-        self.assertEqual(1, repo.HealthMonitorRepository.update.call_count)
-        repo.HealthMonitorRepository.update.has_calls(
-            [mock.call('TEST', health_monitor.id,
-                       provisioning_status=constants.ERROR)])
-        self.assertEqual(1, repo.L7PolicyRepository.update.call_count)
-        repo.L7PolicyRepository.update.has_calls(
-            [mock.call('TEST', l7policies[0].id,
-                       provisioning_status=constants.ERROR)])
-        self.assertEqual(1, repo.L7RuleRepository.update.call_count)
-        repo.L7RuleRepository.update.has_calls(
-            [mock.call('TEST', l7rules[0].id,
                        provisioning_status=constants.ERROR)])
 
     def test_mark_LB_deleted_in_db(self,
@@ -1325,22 +1004,13 @@ class TestDatabaseTasks(base.TestCase):
             provisioning_status=constants.DELETED)
 
         # Test the revert
+
         mock_loadbalancer_repo_update.reset_mock()
         mark_loadbalancer_deleted.revert(self.loadbalancer_mock)
 
         repo.LoadBalancerRepository.update.assert_called_once_with(
             'TEST',
-            id=LB_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_loadbalancer_repo_update.reset_mock()
-        mock_loadbalancer_repo_update.side_effect = Exception('fail')
-        mark_loadbalancer_deleted.revert(self.loadbalancer_mock)
-
-        repo.LoadBalancerRepository.update.assert_called_once_with(
-            'TEST',
-            id=LB_ID,
+            LB_ID,
             provisioning_status=constants.ERROR)
 
     def test_mark_LB_pending_deleted_in_db(self,
@@ -1362,22 +1032,13 @@ class TestDatabaseTasks(base.TestCase):
             provisioning_status=constants.PENDING_DELETE)
 
         # Test the revert
+
         mock_loadbalancer_repo_update.reset_mock()
         mark_loadbalancer_pending_delete.revert(self.loadbalancer_mock)
 
         repo.LoadBalancerRepository.update.assert_called_once_with(
             'TEST',
-            id=LB_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_loadbalancer_repo_update.reset_mock()
-        mock_loadbalancer_repo_update.side_effect = Exception('fail')
-        mark_loadbalancer_pending_delete.revert(self.loadbalancer_mock)
-
-        repo.LoadBalancerRepository.update.assert_called_once_with(
-            'TEST',
-            id=LB_ID,
+            LB_ID,
             provisioning_status=constants.ERROR)
 
     @mock.patch('octavia.db.repositories.HealthMonitorRepository.update')
@@ -1397,29 +1058,23 @@ class TestDatabaseTasks(base.TestCase):
 
         repo.HealthMonitorRepository.update.assert_called_once_with(
             'TEST',
-            HM_ID,
+            POOL_ID,
             delay=1, timeout=2)
 
         # Test the revert
+
         mock_health_mon_repo_update.reset_mock()
         update_health_mon.revert(self.health_mon_mock)
 
+# TODO(johnsom) fix this to set the upper ojects to ERROR
         repo.HealthMonitorRepository.update.assert_called_once_with(
             'TEST',
-            HM_ID,
-            provisioning_status=constants.ERROR)
+            POOL_ID,
+            enabled=0)
 
-        # Test the revert with exception
-        mock_health_mon_repo_update.reset_mock()
-        mock_health_mon_repo_update.side_effect = Exception('fail')
-        update_health_mon.revert(self.health_mon_mock)
-
-        repo.HealthMonitorRepository.update.assert_called_once_with(
-            'TEST',
-            HM_ID,
-            provisioning_status=constants.ERROR)
-
+    @mock.patch('octavia.db.repositories.LoadBalancerRepository.update')
     def test_update_load_balancer_in_db(self,
+                                        mock_listner_repo_update,
                                         mock_generate_uuid,
                                         mock_LOG,
                                         mock_get_session,
@@ -1438,51 +1093,13 @@ class TestDatabaseTasks(base.TestCase):
             name='test', description='test2')
 
         # Test the revert
-        mock_loadbalancer_repo_update.reset_mock()
-        update_load_balancer.revert(self.loadbalancer_mock)
 
-        repo.LoadBalancerRepository.update.assert_called_once_with(
-            'TEST',
-            id=LB_ID,
-            provisioning_status=constants.ERROR)
+        mock_listener_repo_update.reset_mock()
+        update_load_balancer.revert(self.listener_mock)
 
-        # Test the revert with exception
-        mock_loadbalancer_repo_update.reset_mock()
-        mock_loadbalancer_repo_update.side_effect = Exception('fail')
-        update_load_balancer.revert(self.loadbalancer_mock)
-
-        repo.LoadBalancerRepository.update.assert_called_once_with(
-            'TEST',
-            id=LB_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.VipRepository.update')
-    def test_update_vip_in_db_during_update_loadbalancer(self,
-                                                         mock_vip_update,
-                                                         mock_generate_uuid,
-                                                         mock_LOG,
-                                                         mock_get_session,
-                                                         mock_lb_update,
-                                                         mock_listener_update,
-                                                         mock_amphora_update,
-                                                         mock_amphora_delete):
-
-        self.loadbalancer_mock.vip.load_balancer_id = LB_ID
-        update_load_balancer = database_tasks.UpdateLoadbalancerInDB()
-        update_load_balancer.execute(self.loadbalancer_mock,
-                                     {'name': 'test',
-                                      'description': 'test2',
-                                      'vip': {'qos_policy_id': 'fool'}})
-
-        repo.LoadBalancerRepository.update.assert_called_once_with(
-            'TEST',
-            LB_ID,
-            name='test', description='test2')
-
-        repo.VipRepository.update.assert_called_once_with('TEST', LB_ID,
-                                                          qos_policy_id='fool')
-
+    @mock.patch('octavia.db.repositories.ListenerRepository.update')
     def test_update_listener_in_db(self,
+                                   mock_listner_repo_update,
                                    mock_generate_uuid,
                                    mock_LOG,
                                    mock_get_session,
@@ -1501,21 +1118,15 @@ class TestDatabaseTasks(base.TestCase):
             name='test', description='test2')
 
         # Test the revert
-        mock_listener_repo_update.reset_mock()
-        update_listener.revert(self.listener_mock)
-        repo.ListenerRepository.update.assert_called_once_with(
-            'TEST',
-            id=LISTENER_ID,
-            provisioning_status=constants.ERROR)
 
-        # Test the revert
         mock_listener_repo_update.reset_mock()
-        mock_listener_repo_update.side_effect = Exception('fail')
         update_listener.revert(self.listener_mock)
+
+# TODO(johnsom) fix this to set the upper ojects to ERROR
         repo.ListenerRepository.update.assert_called_once_with(
             'TEST',
-            id=LISTENER_ID,
-            provisioning_status=constants.ERROR)
+            LISTENER_ID,
+            enabled=0)
 
     @mock.patch('octavia.db.repositories.MemberRepository.update')
     def test_update_member_in_db(self,
@@ -1538,23 +1149,15 @@ class TestDatabaseTasks(base.TestCase):
             weight=1, ip_address='10.1.0.0')
 
         # Test the revert
+
         mock_member_repo_update.reset_mock()
         update_member.revert(self.member_mock)
 
+# TODO(johnsom) fix this to set the upper ojects to ERROR
         repo.MemberRepository.update.assert_called_once_with(
             'TEST',
             MEMBER_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert
-        mock_member_repo_update.reset_mock()
-        mock_member_repo_update.side_effect = Exception('fail')
-        update_member.revert(self.member_mock)
-
-        repo.MemberRepository.update.assert_called_once_with(
-            'TEST',
-            MEMBER_ID,
-            provisioning_status=constants.ERROR)
+            enabled=0)
 
     @mock.patch(
         'octavia.db.repositories.Repositories.update_pool_and_sp')
@@ -1581,23 +1184,15 @@ class TestDatabaseTasks(base.TestCase):
             update_dict)
 
         # Test the revert
+
         mock_repos_pool_update.reset_mock()
         update_pool.revert(self.pool_mock)
 
+# TODO(johnsom) fix this to set the upper ojects to ERROR
         repo.Repositories.update_pool_and_sp.assert_called_once_with(
             'TEST',
             POOL_ID,
-            {'provisioning_status': constants.ERROR})
-
-        # Test the revert with exception
-        mock_repos_pool_update.reset_mock()
-        mock_repos_pool_update.side_effect = Exception('fail')
-        update_pool.revert(self.pool_mock)
-
-        repo.Repositories.update_pool_and_sp.assert_called_once_with(
-            'TEST',
-            POOL_ID,
-            {'provisioning_status': constants.ERROR})
+            {'enabled': 0})
 
     @mock.patch('octavia.db.repositories.L7PolicyRepository.update')
     def test_update_l7policy_in_db(self,
@@ -1620,23 +1215,15 @@ class TestDatabaseTasks(base.TestCase):
             action=constants.L7POLICY_ACTION_REJECT)
 
         # Test the revert
+
         mock_l7policy_repo_update.reset_mock()
         update_l7policy.revert(self.l7policy_mock)
 
+# TODO(sbalukoff) fix this to set the upper objects to ERROR
         repo.L7PolicyRepository.update.assert_called_once_with(
             'TEST',
             L7POLICY_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert
-        mock_l7policy_repo_update.reset_mock()
-        mock_l7policy_repo_update.side_effect = Exception('fail')
-        update_l7policy.revert(self.l7policy_mock)
-
-        repo.L7PolicyRepository.update.assert_called_once_with(
-            'TEST',
-            L7POLICY_ID,
-            provisioning_status=constants.ERROR)
+            enabled=0)
 
     @mock.patch('octavia.db.repositories.L7RuleRepository.update')
     @mock.patch('octavia.db.repositories.L7PolicyRepository.update')
@@ -1666,23 +1253,15 @@ class TestDatabaseTasks(base.TestCase):
             value='/api')
 
         # Test the revert
+
         mock_l7rule_repo_update.reset_mock()
         update_l7rule.revert(self.l7rule_mock)
 
+# TODO(sbalukoff) fix this to set the upper objects to ERROR
         repo.L7PolicyRepository.update.assert_called_once_with(
             'TEST',
             L7POLICY_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert
-        mock_l7rule_repo_update.reset_mock()
-        mock_l7rule_repo_update.side_effect = Exception('fail')
-        update_l7rule.revert(self.l7rule_mock)
-
-        repo.L7PolicyRepository.update.assert_called_once_with(
-            'TEST',
-            L7POLICY_ID,
-            provisioning_status=constants.ERROR)
+            enabled=0)
 
     def test_get_amphora_details(self,
                                  mock_generate_uuid,
@@ -1758,66 +1337,6 @@ class TestDatabaseTasks(base.TestCase):
         mark_amp_standalone_indb.revert("BADRESULT", _amphora_mock)
         repo.AmphoraRepository.update.assert_called_once_with(
             'TEST', AMP_ID, role=None, vrrp_priority=None)
-
-        # Test revert with exception
-        mock_amphora_repo_update.reset_mock()
-        mock_amphora_repo_update.side_effect = Exception('fail')
-        mark_amp_standalone_indb.revert("BADRESULT", _amphora_mock)
-        repo.AmphoraRepository.update.assert_called_once_with(
-            'TEST', AMP_ID, role=None, vrrp_priority=None)
-
-    @mock.patch('octavia.db.repositories.AmphoraRepository.get')
-    def test_get_amphorae_from_loadbalancer(self,
-                                            mock_amphora_get,
-                                            mock_generate_uuid,
-                                            mock_LOG,
-                                            mock_get_session,
-                                            mock_loadbalancer_repo_update,
-                                            mock_listener_repo_update,
-                                            mock_amphora_repo_update,
-                                            mock_amphora_repo_delete):
-        amp1 = mock.MagicMock()
-        amp1.id = uuidutils.generate_uuid()
-        amp2 = mock.MagicMock()
-        amp2.id = uuidutils.generate_uuid()
-        lb = mock.MagicMock()
-        lb.amphorae = [amp1, amp2]
-
-        mock_amphora_get.side_effect = [_amphora_mock, None]
-
-        get_amps_from_lb_obj = database_tasks.GetAmphoraeFromLoadbalancer()
-        result = get_amps_from_lb_obj.execute(lb)
-        self.assertEqual([_amphora_mock], result)
-
-    @mock.patch('octavia.db.repositories.ListenerRepository.get')
-    def test_get_listeners_from_loadbalancer(self,
-                                             mock_listener_get,
-                                             mock_generate_uuid,
-                                             mock_LOG,
-                                             mock_get_session,
-                                             mock_loadbalancer_repo_update,
-                                             mock_listener_repo_update,
-                                             mock_amphora_repo_update,
-                                             mock_amphora_repo_delete):
-        mock_listener_get.return_value = _listener_mock
-        _loadbalancer_mock.listeners = [_listener_mock]
-        get_list_from_lb_obj = database_tasks.GetListenersFromLoadbalancer()
-        result = get_list_from_lb_obj.execute(_loadbalancer_mock)
-        mock_listener_get.assert_called_once_with('TEST', id=_listener_mock.id)
-        self.assertEqual([_listener_mock], result)
-
-    def test_get_vip_from_loadbalancer(self,
-                                       mock_generate_uuid,
-                                       mock_LOG,
-                                       mock_get_session,
-                                       mock_loadbalancer_repo_update,
-                                       mock_listener_repo_update,
-                                       mock_amphora_repo_update,
-                                       mock_amphora_repo_delete):
-        _loadbalancer_mock.vip = _vip_mock
-        get_vip_from_lb_obj = database_tasks.GetVipFromLoadbalancer()
-        result = get_vip_from_lb_obj.execute(_loadbalancer_mock)
-        self.assertEqual(_vip_mock, result)
 
     @mock.patch('octavia.db.repositories.VRRPGroupRepository.create')
     def test_create_vrrp_group_for_lb(self,
@@ -1907,7 +1426,9 @@ class TestDatabaseTasks(base.TestCase):
         mock_amp_health_repo_update.assert_called_once_with(
             'TEST', amphora_id=AMP_ID, busy=True)
 
+    @mock.patch('octavia.db.repositories.LoadBalancerRepository.update')
     def test_update_lb_server_group_in_db(self,
+                                          mock_listner_repo_update,
                                           mock_generate_uuid,
                                           mock_LOG,
                                           mock_get_session,
@@ -1925,809 +1446,6 @@ class TestDatabaseTasks(base.TestCase):
             server_group_id=SERVER_GROUP_ID)
 
         # Test the revert
+
         mock_listener_repo_update.reset_mock()
         update_server_group_info.revert(LB_ID, SERVER_GROUP_ID)
-
-        # Test the revert with exception
-        mock_listener_repo_update.reset_mock()
-        mock_loadbalancer_repo_update.side_effect = Exception('fail')
-        update_server_group_info.revert(LB_ID, SERVER_GROUP_ID)
-
-    @mock.patch('octavia.db.repositories.HealthMonitorRepository.update')
-    def test_mark_health_mon_active_in_db(self,
-                                          mock_health_mon_repo_update,
-                                          mock_generate_uuid,
-                                          mock_LOG,
-                                          mock_get_session,
-                                          mock_loadbalancer_repo_update,
-                                          mock_listener_repo_update,
-                                          mock_amphora_repo_update,
-                                          mock_amphora_repo_delete):
-
-        mark_health_mon_active = (database_tasks.MarkHealthMonitorActiveInDB())
-        mark_health_mon_active.execute(self.health_mon_mock)
-
-        mock_health_mon_repo_update.assert_called_once_with(
-            'TEST',
-            HM_ID,
-            operating_status=constants.ONLINE,
-            provisioning_status=constants.ACTIVE)
-
-        # Test the revert
-        mock_health_mon_repo_update.reset_mock()
-        mark_health_mon_active.revert(self.health_mon_mock)
-
-        mock_health_mon_repo_update.assert_called_once_with(
-            'TEST',
-            id=HM_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_health_mon_repo_update.reset_mock()
-        mock_health_mon_repo_update.side_effect = Exception('fail')
-        mark_health_mon_active.revert(self.health_mon_mock)
-
-        mock_health_mon_repo_update.assert_called_once_with(
-            'TEST',
-            id=HM_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.HealthMonitorRepository.update')
-    def test_mark_health_mon_pending_create_in_db(
-            self,
-            mock_health_mon_repo_update,
-            mock_generate_uuid,
-            mock_LOG,
-            mock_get_session,
-            mock_loadbalancer_repo_update,
-            mock_listener_repo_update,
-            mock_amphora_repo_update,
-            mock_amphora_repo_delete):
-
-        mark_health_mon_pending_create = (database_tasks.
-                                          MarkHealthMonitorPendingCreateInDB())
-        mark_health_mon_pending_create.execute(self.health_mon_mock)
-
-        mock_health_mon_repo_update.assert_called_once_with(
-            'TEST',
-            HM_ID,
-            provisioning_status=constants.PENDING_CREATE)
-
-        # Test the revert
-        mock_health_mon_repo_update.reset_mock()
-        mark_health_mon_pending_create.revert(self.health_mon_mock)
-
-        mock_health_mon_repo_update.assert_called_once_with(
-            'TEST',
-            id=HM_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_health_mon_repo_update.reset_mock()
-        mock_health_mon_repo_update.side_effect = Exception('fail')
-        mark_health_mon_pending_create.revert(self.health_mon_mock)
-
-        mock_health_mon_repo_update.assert_called_once_with(
-            'TEST',
-            id=HM_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.HealthMonitorRepository.update')
-    def test_mark_health_mon_pending_delete_in_db(
-            self,
-            mock_health_mon_repo_update,
-            mock_generate_uuid,
-            mock_LOG,
-            mock_get_session,
-            mock_loadbalancer_repo_update,
-            mock_listener_repo_update,
-            mock_amphora_repo_update,
-            mock_amphora_repo_delete):
-
-        mark_health_mon_pending_delete = (database_tasks.
-                                          MarkHealthMonitorPendingDeleteInDB())
-        mark_health_mon_pending_delete.execute(self.health_mon_mock)
-
-        mock_health_mon_repo_update.assert_called_once_with(
-            'TEST',
-            HM_ID,
-            provisioning_status=constants.PENDING_DELETE)
-
-        # Test the revert
-        mock_health_mon_repo_update.reset_mock()
-        mark_health_mon_pending_delete.revert(self.health_mon_mock)
-
-        mock_health_mon_repo_update.assert_called_once_with(
-            'TEST',
-            id=HM_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_health_mon_repo_update.reset_mock()
-        mock_health_mon_repo_update.side_effect = Exception('fail')
-        mark_health_mon_pending_delete.revert(self.health_mon_mock)
-
-        mock_health_mon_repo_update.assert_called_once_with(
-            'TEST',
-            id=HM_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.HealthMonitorRepository.update')
-    def test_mark_health_mon_pending_update_in_db(
-            self,
-            mock_health_mon_repo_update,
-            mock_generate_uuid,
-            mock_LOG,
-            mock_get_session,
-            mock_loadbalancer_repo_update,
-            mock_listener_repo_update,
-            mock_amphora_repo_update,
-            mock_amphora_repo_delete):
-
-        mark_health_mon_pending_update = (database_tasks.
-                                          MarkHealthMonitorPendingUpdateInDB())
-        mark_health_mon_pending_update.execute(self.health_mon_mock)
-
-        mock_health_mon_repo_update.assert_called_once_with(
-            'TEST',
-            HM_ID,
-            provisioning_status=constants.PENDING_UPDATE)
-
-        # Test the revert
-        mock_health_mon_repo_update.reset_mock()
-        mark_health_mon_pending_update.revert(self.health_mon_mock)
-
-        mock_health_mon_repo_update.assert_called_once_with(
-            'TEST',
-            id=HM_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_health_mon_repo_update.reset_mock()
-        mock_health_mon_repo_update.side_effect = Exception('fail')
-        mark_health_mon_pending_update.revert(self.health_mon_mock)
-
-        mock_health_mon_repo_update.assert_called_once_with(
-            'TEST',
-            id=HM_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.L7PolicyRepository.update')
-    def test_mark_l7policy_active_in_db(self,
-                                        mock_l7policy_repo_update,
-                                        mock_generate_uuid,
-                                        mock_LOG,
-                                        mock_get_session,
-                                        mock_loadbalancer_repo_update,
-                                        mock_listener_repo_update,
-                                        mock_amphora_repo_update,
-                                        mock_amphora_repo_delete):
-
-        mark_l7policy_active = (database_tasks.MarkL7PolicyActiveInDB())
-        mark_l7policy_active.execute(self.l7policy_mock)
-
-        mock_l7policy_repo_update.assert_called_once_with(
-            'TEST',
-            L7POLICY_ID,
-            provisioning_status=constants.ACTIVE,
-            operating_status=constants.ONLINE)
-
-        # Test the revert
-        mock_l7policy_repo_update.reset_mock()
-        mark_l7policy_active.revert(self.l7policy_mock)
-
-        mock_l7policy_repo_update.assert_called_once_with(
-            'TEST',
-            id=L7POLICY_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_l7policy_repo_update.reset_mock()
-        mock_l7policy_repo_update.side_effect = Exception('fail')
-        mark_l7policy_active.revert(self.l7policy_mock)
-
-        mock_l7policy_repo_update.assert_called_once_with(
-            'TEST',
-            id=L7POLICY_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.L7PolicyRepository.update')
-    def test_mark_l7policy_pending_create_in_db(self,
-                                                mock_l7policy_repo_update,
-                                                mock_generate_uuid,
-                                                mock_LOG,
-                                                mock_get_session,
-                                                mock_loadbalancer_repo_update,
-                                                mock_listener_repo_update,
-                                                mock_amphora_repo_update,
-                                                mock_amphora_repo_delete):
-
-        mark_l7policy_pending_create = (database_tasks.
-                                        MarkL7PolicyPendingCreateInDB())
-        mark_l7policy_pending_create.execute(self.l7policy_mock)
-
-        mock_l7policy_repo_update.assert_called_once_with(
-            'TEST',
-            L7POLICY_ID,
-            provisioning_status=constants.PENDING_CREATE)
-
-        # Test the revert
-        mock_l7policy_repo_update.reset_mock()
-        mark_l7policy_pending_create.revert(self.l7policy_mock)
-
-        mock_l7policy_repo_update.assert_called_once_with(
-            'TEST',
-            id=L7POLICY_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_l7policy_repo_update.reset_mock()
-        mock_l7policy_repo_update.side_effect = Exception('fail')
-        mark_l7policy_pending_create.revert(self.l7policy_mock)
-
-        mock_l7policy_repo_update.assert_called_once_with(
-            'TEST',
-            id=L7POLICY_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.L7PolicyRepository.update')
-    def test_mark_l7policy_pending_delete_in_db(self,
-                                                mock_l7policy_repo_update,
-                                                mock_generate_uuid,
-                                                mock_LOG,
-                                                mock_get_session,
-                                                mock_loadbalancer_repo_update,
-                                                mock_listener_repo_update,
-                                                mock_amphora_repo_update,
-                                                mock_amphora_repo_delete):
-
-        mark_l7policy_pending_delete = (database_tasks.
-                                        MarkL7PolicyPendingDeleteInDB())
-        mark_l7policy_pending_delete.execute(self.l7policy_mock)
-
-        mock_l7policy_repo_update.assert_called_once_with(
-            'TEST',
-            L7POLICY_ID,
-            provisioning_status=constants.PENDING_DELETE)
-
-        # Test the revert
-        mock_l7policy_repo_update.reset_mock()
-        mark_l7policy_pending_delete.revert(self.l7policy_mock)
-
-        mock_l7policy_repo_update.assert_called_once_with(
-            'TEST',
-            id=L7POLICY_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_l7policy_repo_update.reset_mock()
-        mock_l7policy_repo_update.side_effect = Exception('fail')
-        mark_l7policy_pending_delete.revert(self.l7policy_mock)
-
-        mock_l7policy_repo_update.assert_called_once_with(
-            'TEST',
-            id=L7POLICY_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.L7PolicyRepository.update')
-    def test_mark_l7policy_pending_update_in_db(self,
-                                                mock_l7policy_repo_update,
-                                                mock_generate_uuid,
-                                                mock_LOG,
-                                                mock_get_session,
-                                                mock_loadbalancer_repo_update,
-                                                mock_listener_repo_update,
-                                                mock_amphora_repo_update,
-                                                mock_amphora_repo_delete):
-
-        mark_l7policy_pending_update = (database_tasks.
-                                        MarkL7PolicyPendingUpdateInDB())
-        mark_l7policy_pending_update.execute(self.l7policy_mock)
-
-        mock_l7policy_repo_update.assert_called_once_with(
-            'TEST',
-            L7POLICY_ID,
-            provisioning_status=constants.PENDING_UPDATE)
-
-        # Test the revert
-        mock_l7policy_repo_update.reset_mock()
-        mark_l7policy_pending_update.revert(self.l7policy_mock)
-
-        mock_l7policy_repo_update.assert_called_once_with(
-            'TEST',
-            id=L7POLICY_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_l7policy_repo_update.reset_mock()
-        mock_l7policy_repo_update.side_effect = Exception('fail')
-        mark_l7policy_pending_update.revert(self.l7policy_mock)
-
-        mock_l7policy_repo_update.assert_called_once_with(
-            'TEST',
-            id=L7POLICY_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.L7RuleRepository.update')
-    def test_mark_l7rule_active_in_db(self,
-                                      mock_l7rule_repo_update,
-                                      mock_generate_uuid,
-                                      mock_LOG,
-                                      mock_get_session,
-                                      mock_loadbalancer_repo_update,
-                                      mock_listener_repo_update,
-                                      mock_amphora_repo_update,
-                                      mock_amphora_repo_delete):
-
-        mark_l7rule_active = (database_tasks.MarkL7RuleActiveInDB())
-        mark_l7rule_active.execute(self.l7rule_mock)
-
-        mock_l7rule_repo_update.assert_called_once_with(
-            'TEST',
-            L7RULE_ID,
-            provisioning_status=constants.ACTIVE,
-            operating_status=constants.ONLINE)
-
-        # Test the revert
-        mock_l7rule_repo_update.reset_mock()
-        mark_l7rule_active.revert(self.l7rule_mock)
-
-        mock_l7rule_repo_update.assert_called_once_with(
-            'TEST',
-            id=L7RULE_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_l7rule_repo_update.reset_mock()
-        mock_l7rule_repo_update.side_effect = Exception('fail')
-        mark_l7rule_active.revert(self.l7rule_mock)
-
-        mock_l7rule_repo_update.assert_called_once_with(
-            'TEST',
-            id=L7RULE_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.L7RuleRepository.update')
-    def test_mark_l7rule_pending_create_in_db(self,
-                                              mock_l7rule_repo_update,
-                                              mock_generate_uuid,
-                                              mock_LOG,
-                                              mock_get_session,
-                                              mock_loadbalancer_repo_update,
-                                              mock_listener_repo_update,
-                                              mock_amphora_repo_update,
-                                              mock_amphora_repo_delete):
-
-        mark_l7rule_pending_create = (database_tasks.
-                                      MarkL7RulePendingCreateInDB())
-        mark_l7rule_pending_create.execute(self.l7rule_mock)
-
-        mock_l7rule_repo_update.assert_called_once_with(
-            'TEST',
-            L7RULE_ID,
-            provisioning_status=constants.PENDING_CREATE)
-
-        # Test the revert
-        mock_l7rule_repo_update.reset_mock()
-        mark_l7rule_pending_create.revert(self.l7rule_mock)
-
-        mock_l7rule_repo_update.assert_called_once_with(
-            'TEST',
-            id=L7RULE_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_l7rule_repo_update.reset_mock()
-        mock_l7rule_repo_update.side_effect = Exception('fail')
-        mark_l7rule_pending_create.revert(self.l7rule_mock)
-
-        mock_l7rule_repo_update.assert_called_once_with(
-            'TEST',
-            id=L7RULE_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.L7RuleRepository.update')
-    def test_mark_l7rule_pending_delete_in_db(self,
-                                              mock_l7rule_repo_update,
-                                              mock_generate_uuid,
-                                              mock_LOG,
-                                              mock_get_session,
-                                              mock_loadbalancer_repo_update,
-                                              mock_listener_repo_update,
-                                              mock_amphora_repo_update,
-                                              mock_amphora_repo_delete):
-
-        mark_l7rule_pending_delete = (database_tasks.
-                                      MarkL7RulePendingDeleteInDB())
-        mark_l7rule_pending_delete.execute(self.l7rule_mock)
-
-        mock_l7rule_repo_update.assert_called_once_with(
-            'TEST',
-            L7RULE_ID,
-            provisioning_status=constants.PENDING_DELETE)
-
-        # Test the revert
-        mock_l7rule_repo_update.reset_mock()
-        mark_l7rule_pending_delete.revert(self.l7rule_mock)
-
-        mock_l7rule_repo_update.assert_called_once_with(
-            'TEST',
-            id=L7RULE_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_l7rule_repo_update.reset_mock()
-        mock_l7rule_repo_update.side_effect = Exception('fail')
-        mark_l7rule_pending_delete.revert(self.l7rule_mock)
-
-        mock_l7rule_repo_update.assert_called_once_with(
-            'TEST',
-            id=L7RULE_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.L7RuleRepository.update')
-    def test_mark_l7rule_pending_update_in_db(self,
-                                              mock_l7rule_repo_update,
-                                              mock_generate_uuid,
-                                              mock_LOG,
-                                              mock_get_session,
-                                              mock_loadbalancer_repo_update,
-                                              mock_listener_repo_update,
-                                              mock_amphora_repo_update,
-                                              mock_amphora_repo_delete):
-
-        mark_l7rule_pending_update = (database_tasks.
-                                      MarkL7RulePendingUpdateInDB())
-        mark_l7rule_pending_update.execute(self.l7rule_mock)
-
-        mock_l7rule_repo_update.assert_called_once_with(
-            'TEST',
-            L7RULE_ID,
-            provisioning_status=constants.PENDING_UPDATE)
-
-        # Test the revert
-        mock_l7rule_repo_update.reset_mock()
-        mark_l7rule_pending_update.revert(self.l7rule_mock)
-
-        mock_l7rule_repo_update.assert_called_once_with(
-            'TEST',
-            id=L7RULE_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_l7rule_repo_update.reset_mock()
-        mock_l7rule_repo_update.side_effect = Exception('fail')
-        mark_l7rule_pending_update.revert(self.l7rule_mock)
-
-        mock_l7rule_repo_update.assert_called_once_with(
-            'TEST',
-            id=L7RULE_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.MemberRepository.update')
-    def test_mark_member_active_in_db(self,
-                                      mock_member_repo_update,
-                                      mock_generate_uuid,
-                                      mock_LOG,
-                                      mock_get_session,
-                                      mock_loadbalancer_repo_update,
-                                      mock_listener_repo_update,
-                                      mock_amphora_repo_update,
-                                      mock_amphora_repo_delete):
-
-        mark_member_active = (database_tasks.MarkMemberActiveInDB())
-        mark_member_active.execute(self.member_mock)
-
-        mock_member_repo_update.assert_called_once_with(
-            'TEST',
-            MEMBER_ID,
-            provisioning_status=constants.ACTIVE)
-
-        # Test the revert
-        mock_member_repo_update.reset_mock()
-        mark_member_active.revert(self.member_mock)
-
-        mock_member_repo_update.assert_called_once_with(
-            'TEST',
-            id=MEMBER_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_member_repo_update.reset_mock()
-        mock_member_repo_update.side_effect = Exception('fail')
-        mark_member_active.revert(self.member_mock)
-
-        mock_member_repo_update.assert_called_once_with(
-            'TEST',
-            id=MEMBER_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.MemberRepository.update')
-    def test_mark_member_pending_create_in_db(self,
-                                              mock_member_repo_update,
-                                              mock_generate_uuid,
-                                              mock_LOG,
-                                              mock_get_session,
-                                              mock_loadbalancer_repo_update,
-                                              mock_listener_repo_update,
-                                              mock_amphora_repo_update,
-                                              mock_amphora_repo_delete):
-
-        mark_member_pending_create = (database_tasks.
-                                      MarkMemberPendingCreateInDB())
-        mark_member_pending_create.execute(self.member_mock)
-
-        mock_member_repo_update.assert_called_once_with(
-            'TEST',
-            MEMBER_ID,
-            provisioning_status=constants.PENDING_CREATE)
-
-        # Test the revert
-        mock_member_repo_update.reset_mock()
-        mark_member_pending_create.revert(self.member_mock)
-
-        mock_member_repo_update.assert_called_once_with(
-            'TEST',
-            id=MEMBER_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_member_repo_update.reset_mock()
-        mock_member_repo_update.side_effect = Exception('fail')
-        mark_member_pending_create.revert(self.member_mock)
-
-        mock_member_repo_update.assert_called_once_with(
-            'TEST',
-            id=MEMBER_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.MemberRepository.update')
-    def test_mark_member_pending_delete_in_db(self,
-                                              mock_member_repo_update,
-                                              mock_generate_uuid,
-                                              mock_LOG,
-                                              mock_get_session,
-                                              mock_loadbalancer_repo_update,
-                                              mock_listener_repo_update,
-                                              mock_amphora_repo_update,
-                                              mock_amphora_repo_delete):
-
-        mark_member_pending_delete = (database_tasks.
-                                      MarkMemberPendingDeleteInDB())
-        mark_member_pending_delete.execute(self.member_mock)
-
-        mock_member_repo_update.assert_called_once_with(
-            'TEST',
-            MEMBER_ID,
-            provisioning_status=constants.PENDING_DELETE)
-
-        # Test the revert
-        mock_member_repo_update.reset_mock()
-        mark_member_pending_delete.revert(self.member_mock)
-
-        mock_member_repo_update.assert_called_once_with(
-            'TEST',
-            id=MEMBER_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_member_repo_update.reset_mock()
-        mock_member_repo_update.side_effect = Exception('fail')
-        mark_member_pending_delete.revert(self.member_mock)
-
-        mock_member_repo_update.assert_called_once_with(
-            'TEST',
-            id=MEMBER_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.MemberRepository.update')
-    def test_mark_member_pending_update_in_db(self,
-                                              mock_member_repo_update,
-                                              mock_generate_uuid,
-                                              mock_LOG,
-                                              mock_get_session,
-                                              mock_loadbalancer_repo_update,
-                                              mock_listener_repo_update,
-                                              mock_amphora_repo_update,
-                                              mock_amphora_repo_delete):
-
-        mark_member_pending_update = (database_tasks.
-                                      MarkMemberPendingUpdateInDB())
-        mark_member_pending_update.execute(self.member_mock)
-
-        mock_member_repo_update.assert_called_once_with(
-            'TEST',
-            MEMBER_ID,
-            provisioning_status=constants.PENDING_UPDATE)
-
-        # Test the revert
-        mock_member_repo_update.reset_mock()
-        mark_member_pending_update.revert(self.member_mock)
-
-        mock_member_repo_update.assert_called_once_with(
-            'TEST',
-            id=MEMBER_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_member_repo_update.reset_mock()
-        mock_member_repo_update.side_effect = Exception('fail')
-        mark_member_pending_update.revert(self.member_mock)
-
-        mock_member_repo_update.assert_called_once_with(
-            'TEST',
-            id=MEMBER_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.PoolRepository.update')
-    def test_mark_pool_active_in_db(self,
-                                    mock_pool_repo_update,
-                                    mock_generate_uuid,
-                                    mock_LOG,
-                                    mock_get_session,
-                                    mock_loadbalancer_repo_update,
-                                    mock_listener_repo_update,
-                                    mock_amphora_repo_update,
-                                    mock_amphora_repo_delete):
-
-        mark_pool_active = (database_tasks.MarkPoolActiveInDB())
-        mark_pool_active.execute(self.pool_mock)
-
-        mock_pool_repo_update.assert_called_once_with(
-            'TEST',
-            POOL_ID,
-            provisioning_status=constants.ACTIVE)
-
-        # Test the revert
-        mock_pool_repo_update.reset_mock()
-        mark_pool_active.revert(self.pool_mock)
-
-        mock_pool_repo_update.assert_called_once_with(
-            'TEST',
-            id=POOL_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_pool_repo_update.reset_mock()
-        mock_pool_repo_update.side_effect = Exception('fail')
-        mark_pool_active.revert(self.pool_mock)
-
-        mock_pool_repo_update.assert_called_once_with(
-            'TEST',
-            id=POOL_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.PoolRepository.update')
-    def test_mark_pool_pending_create_in_db(self,
-                                            mock_pool_repo_update,
-                                            mock_generate_uuid,
-                                            mock_LOG,
-                                            mock_get_session,
-                                            mock_loadbalancer_repo_update,
-                                            mock_listener_repo_update,
-                                            mock_amphora_repo_update,
-                                            mock_amphora_repo_delete):
-
-        mark_pool_pending_create = (database_tasks.MarkPoolPendingCreateInDB())
-        mark_pool_pending_create.execute(self.pool_mock)
-
-        mock_pool_repo_update.assert_called_once_with(
-            'TEST',
-            POOL_ID,
-            provisioning_status=constants.PENDING_CREATE)
-
-        # Test the revert
-        mock_pool_repo_update.reset_mock()
-        mark_pool_pending_create.revert(self.pool_mock)
-
-        mock_pool_repo_update.assert_called_once_with(
-            'TEST',
-            id=POOL_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_pool_repo_update.reset_mock()
-        mock_pool_repo_update.side_effect = Exception('fail')
-        mark_pool_pending_create.revert(self.pool_mock)
-
-        mock_pool_repo_update.assert_called_once_with(
-            'TEST',
-            id=POOL_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.PoolRepository.update')
-    def test_mark_pool_pending_delete_in_db(self,
-                                            mock_pool_repo_update,
-                                            mock_generate_uuid,
-                                            mock_LOG,
-                                            mock_get_session,
-                                            mock_loadbalancer_repo_update,
-                                            mock_listener_repo_update,
-                                            mock_amphora_repo_update,
-                                            mock_amphora_repo_delete):
-
-        mark_pool_pending_delete = (database_tasks.MarkPoolPendingDeleteInDB())
-        mark_pool_pending_delete.execute(self.pool_mock)
-
-        mock_pool_repo_update.assert_called_once_with(
-            'TEST',
-            POOL_ID,
-            provisioning_status=constants.PENDING_DELETE)
-
-        # Test the revert
-        mock_pool_repo_update.reset_mock()
-        mark_pool_pending_delete.revert(self.pool_mock)
-
-        mock_pool_repo_update.assert_called_once_with(
-            'TEST',
-            id=POOL_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_pool_repo_update.reset_mock()
-        mock_pool_repo_update.side_effect = Exception('fail')
-        mark_pool_pending_delete.revert(self.pool_mock)
-
-        mock_pool_repo_update.assert_called_once_with(
-            'TEST',
-            id=POOL_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.PoolRepository.update')
-    def test_mark_pool_pending_update_in_db(self,
-                                            mock_pool_repo_update,
-                                            mock_generate_uuid,
-                                            mock_LOG,
-                                            mock_get_session,
-                                            mock_loadbalancer_repo_update,
-                                            mock_listener_repo_update,
-                                            mock_amphora_repo_update,
-                                            mock_amphora_repo_delete):
-
-        mark_pool_pending_update = (database_tasks.
-                                    MarkPoolPendingUpdateInDB())
-        mark_pool_pending_update.execute(self.pool_mock)
-
-        mock_pool_repo_update.assert_called_once_with(
-            'TEST',
-            POOL_ID,
-            provisioning_status=constants.PENDING_UPDATE)
-
-        # Test the revert
-        mock_pool_repo_update.reset_mock()
-        mark_pool_pending_update.revert(self.pool_mock)
-
-        mock_pool_repo_update.assert_called_once_with(
-            'TEST',
-            id=POOL_ID,
-            provisioning_status=constants.ERROR)
-
-        # Test the revert with exception
-        mock_pool_repo_update.reset_mock()
-        mock_pool_repo_update.side_effect = Exception('fail')
-        mark_pool_pending_update.revert(self.pool_mock)
-
-        mock_pool_repo_update.assert_called_once_with(
-            'TEST',
-            id=POOL_ID,
-            provisioning_status=constants.ERROR)
-
-    @mock.patch('octavia.db.repositories.MemberRepository.update_pool_members')
-    def test_update_pool_members_operating_status_in_db(
-            self,
-            mock_member_repo_update_pool_members,
-            mock_generate_uuid,
-            mock_LOG,
-            mock_get_session,
-            mock_loadbalancer_repo_update,
-            mock_listener_repo_update,
-            mock_amphora_repo_update,
-            mock_amphora_repo_delete):
-
-        update_members = database_tasks.UpdatePoolMembersOperatingStatusInDB()
-        update_members.execute(self.pool_mock, constants.ONLINE)
-
-        mock_member_repo_update_pool_members.assert_called_once_with(
-            'TEST',
-            POOL_ID,
-            operating_status=constants.ONLINE)

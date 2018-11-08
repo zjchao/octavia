@@ -17,12 +17,10 @@
 Octavia base exception handling.
 """
 
-import six
-
 from oslo_utils import excutils
 from webob import exc
 
-from octavia.i18n import _
+from octavia.i18n import _LE, _LI
 
 
 class OctaviaException(Exception):
@@ -33,15 +31,11 @@ class OctaviaException(Exception):
     with the keyword arguments provided to the constructor.
     """
     message = _("An unknown exception occurred.")
-    orig_msg = None
-    orig_code = None
 
     def __init__(self, *args, **kwargs):
         try:
-            if args:
+            if len(args) > 0:
                 self.message = args[0]
-                self.orig_msg = kwargs.get('orig_msg')
-                self.orig_code = kwargs.get('orig_code')
             super(OctaviaException, self).__init__(self.message % kwargs)
             self.msg = self.message % kwargs
         except Exception:
@@ -52,7 +46,7 @@ class OctaviaException(Exception):
                     super(OctaviaException, self).__init__(self.message)
 
     def __unicode__(self):
-        return six.text_type(self.msg)
+        return unicode(self.msg)
 
     @staticmethod
     def use_fatal_exceptions():
@@ -76,9 +70,9 @@ class NotFound(APIException):
     code = 404
 
 
-class PolicyForbidden(APIException):
-    msg = _("Policy does not allow this request to be performed.")
-    code = 403
+class NotAuthorized(APIException):
+    msg = _("Not authorized.")
+    code = 401
 
 
 class InvalidOption(APIException):
@@ -86,24 +80,8 @@ class InvalidOption(APIException):
     code = 400
 
 
-class InvalidFilterArgument(APIException):
-    msg = "One or more arguments are either duplicate or invalid"
-    code = 400
-
-
-class DisabledOption(APIException):
-    msg = _("The selected %(option)s is not allowed in this deployment: "
-            "%(value)s")
-    code = 400
-
-
 class L7RuleValidation(APIException):
     msg = _("Error parsing L7Rule: %(error)s")
-    code = 400
-
-
-class SingleCreateDetailsMissing(APIException):
-    msg = _("Missing details for %(type)s object: %(name)")
     code = 400
 
 
@@ -130,11 +108,6 @@ class UnreadableCert(OctaviaException):
 
 class MisMatchedKey(OctaviaException):
     message = _("Key and x509 certificate do not match")
-
-
-class CertificateRetrievalException(APIException):
-    msg = _('Could not retrieve certificate: %(ref)s')
-    code = 400
 
 
 class CertificateStorageException(OctaviaException):
@@ -177,51 +150,46 @@ class ImmutableObject(APIException):
     code = 409
 
 
-class LBPendingStateError(APIException):
-    msg = _("Invalid state %(state)s of loadbalancer resource %(id)s")
-    code = 409
-
-
 class TooManyL7RulesOnL7Policy(APIException):
-    msg = _("Too many rules on L7 policy %(id)s")
+    message = _("Too many rules on L7 policy %(id)s")
     code = 409
 
 
 class ComputeBuildException(OctaviaException):
-    message = _("Failed to build compute instance due to: %(fault)s")
-
-
-class ComputeBuildQueueTimeoutException(OctaviaException):
-    message = _('Failed to get an amphora build slot.')
+    message = _LE('Failed to build compute instance.')
 
 
 class ComputeDeleteException(OctaviaException):
-    message = _('Failed to delete compute instance.')
+    message = _LE('Failed to delete compute instance.')
 
 
 class ComputeGetException(OctaviaException):
-    message = _('Failed to retrieve compute instance.')
+    message = _LE('Failed to retrieve compute instance.')
 
 
 class ComputeStatusException(OctaviaException):
-    message = _('Failed to retrieve compute instance status.')
+    message = _LE('Failed to retrieve compute instance status.')
 
 
 class ComputeGetInterfaceException(OctaviaException):
-    message = _('Failed to retrieve compute virtual interfaces.')
+    message = _LE('Failed to retrieve compute virtual interfaces.')
 
 
-class IDAlreadyExists(APIException):
-    msg = _('Already an entity with that specified id.')
+class IDAlreadyExists(OctaviaException):
+    message = _LE('Already an entity with that specified id.')
     code = 409
 
 
 class NoReadyAmphoraeException(OctaviaException):
-    message = _('There are not any READY amphora available.')
+    message = _LE('There are not any READY amphora available.')
 
 
 class GlanceNoTaggedImages(OctaviaException):
-    message = _("No Glance images are tagged with %(tag)s tag.")
+    message = _LE("No Glance images are tagged with %(tag)s tag.")
+
+
+class NoSuitableAmphoraException(OctaviaException):
+    message = _LE('Unable to allocate an amphora due to: %(msg)s')
 
 
 # This is an internal use exception for the taskflow work flow
@@ -229,137 +197,43 @@ class GlanceNoTaggedImages(OctaviaException):
 # normal part of operation while waiting for compute to go active
 # on the instance
 class ComputeWaitTimeoutException(OctaviaException):
-    message = _('Waiting for compute to go active timeout.')
+    message = _LI('Waiting for compute to go active timeout.')
 
 
 class InvalidTopology(OctaviaException):
-    message = _('Invalid topology specified: %(topology)s')
+    message = _LE('Invalid topology specified: %(topology)s')
 
 
 # L7 policy and rule exceptions
 class InvalidL7PolicyAction(APIException):
-    msg = _('Invalid L7 Policy action specified: %(action)s')
+    message = _LE('Invalid L7 Policy action specified: %(action)s')
     code = 400
 
 
 class InvalidL7PolicyArgs(APIException):
-    msg = _('Invalid L7 Policy arguments: %(msg)s')
+    message = _LE('Invalid L7 Policy arguments: %(msg)s')
     code = 400
 
 
 class InvalidURL(OctaviaException):
-    message = _('Not a valid URL: %(url)s')
-
-
-class InvalidURLPath(APIException):
-    msg = _('Not a valid URLPath: %(url_path)s')
-    code = 400
+    message = _LE('Not a valid URL: %(url)s')
 
 
 class InvalidString(OctaviaException):
-    message = _('Invalid characters in %(what)s')
+    message = _LE('Invalid characters in %(what)s')
 
 
 class InvalidRegex(OctaviaException):
-    message = _('Unable to parse regular expression: %(e)s')
+    message = _LE('Unable to parse regular expression: %(e)s')
 
 
 class InvalidL7Rule(OctaviaException):
-    message = _('Invalid L7 Rule: %(msg)s')
+    message = _LE('Invalid L7 Rule: $(msg)s')
 
 
 class ServerGroupObjectCreateException(OctaviaException):
-    message = _('Failed to create server group object.')
+    message = _LE('Failed to create server group object.')
 
 
 class ServerGroupObjectDeleteException(OctaviaException):
-    message = _('Failed to delete server group object.')
-
-
-class InvalidAmphoraOperatingSystem(OctaviaException):
-    message = _('Invalid amphora operating system: %(os_name)s')
-
-
-class QuotaException(APIException):
-    msg = _('Quota has been met for resources: %(resource)s')
-    code = 403
-
-
-class ProjectBusyException(APIException):
-    msg = _('Project busy.  Unable to lock the project.  Please try again.')
-    code = 503
-
-
-class MissingProjectID(OctaviaException):
-    message = _('Missing project ID in request where one is required.')
-
-
-class MissingAPIProjectID(APIException):
-    message = _('Missing project ID in request where one is required.')
-    code = 400
-
-
-class InvalidSubresource(APIException):
-    msg = _('%(resource)s %(id)s not found.')
-    code = 400
-
-
-class ValidationException(APIException):
-    msg = _('Validation failure: %(detail)s')
-    code = 400
-
-
-class VIPValidationException(APIException):
-    msg = _('Validation failure: VIP must contain one of: %(objects)s.')
-    code = 400
-
-
-class InvalidSortKey(APIException):
-    msg = _("Supplied sort key '%(key)s' is not valid.")
-    code = 400
-
-
-class InvalidSortDirection(APIException):
-    msg = _("Supplied sort direction '%(key)s' is not valid.")
-    code = 400
-
-
-class InvalidMarker(APIException):
-    msg = _("Supplied pagination marker '%(key)s' is not valid.")
-    code = 400
-
-
-class InvalidLimit(APIException):
-    msg = _("Supplied pagination limit '%(key)s' is not valid.")
-    code = 400
-
-
-class MissingVIPSecurityGroup(OctaviaException):
-    message = _('VIP security group is missing for load balancer: %(lb_id)s')
-
-
-class ProviderNotEnabled(APIException):
-    msg = _("Provider '%(prov)s' is not enabled.")
-    code = 400
-
-
-class ProviderNotFound(APIException):
-    msg = _("Provider '%(prov)s' was not found.")
-    code = 501
-
-
-class ProviderDriverError(APIException):
-    msg = _("Provider '%(prov)s' reports error: %(user_msg)s")
-    code = 500
-
-
-class ProviderNotImplementedError(APIException):
-    msg = _("Provider '%(prov)s' does not support a requested action: "
-            "%(user_msg)s")
-    code = 501
-
-
-class ProviderUnsupportedOptionError(APIException):
-    msg = _("Provider '%(prov)s' does not support a requested option: "
-            "%(user_msg)s")
-    code = 501
+    message = _LE('Failed to delete server group object.')

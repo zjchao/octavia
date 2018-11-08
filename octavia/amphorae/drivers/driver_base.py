@@ -22,91 +22,72 @@ import six
 class AmphoraLoadBalancerDriver(object):
 
     @abc.abstractmethod
-    def update_amphora_listeners(self, listeners, amphora_id, timeout_dict):
-        """Update the amphora with a new configuration.
-
-        :param listeners: List of listeners to update.
-        :type listener: list
-        :param amphora_id: The ID of the amphora to update
-        :type amphora_id: string
-        :param timeout_dict: Dictionary of timeout values for calls to the
-                             amphora. May contain: req_conn_timeout,
-                             req_read_timeout, conn_max_retries,
-                             conn_retry_interval
-        :returns: None
-
-        Builds a new configuration, pushes it to the amphora, and reloads
-        the listener on one amphora.
-        """
-        pass
-
-    @abc.abstractmethod
     def update(self, listener, vip):
-        """Update the amphora with a new configuration.
+        """Update the amphora with a new configuration
 
         :param listener: listener object,
-                         need to use its protocol_port property
+        need to use its protocol_port property
         :type listener: object
         :param vip: vip object, need to use its ip_address property
         :type vip: object
-        :returns: None
+        :returns: return a value list (listener, vip, status flag--update)
 
         At this moment, we just build the basic structure for testing, will
-        add more function along with the development.
+        add more function along with the development
         """
         pass
 
     @abc.abstractmethod
     def stop(self, listener, vip):
-        """Stop the listener on the vip.
+        """Stop the listener on the vip
 
         :param listener: listener object,
-                         need to use its protocol_port property
+        need to use its protocol_port property
         :type listener: object
         :param vip: vip object, need to use its ip_address property
         :type vip: object
         :returns: return a value list (listener, vip, status flag--suspend)
 
         At this moment, we just build the basic structure for testing, will
-        add more function along with the development.
+        add more function along with the development
         """
         pass
 
     @abc.abstractmethod
     def start(self, listener, vip):
-        """Start the listener on the vip.
+        """Start the listener on the vip
 
         :param listener: listener object,
-                         need to use its protocol_port property
+        need to use its protocol_port property
         :type listener: object
-        :param vip: vip object, need to use its ip_address property
+        :param vip : vip object, need to use its ip_address property
         :type vip: object
         :returns: return a value list (listener, vip, status flag--enable)
 
         At this moment, we just build the basic structure for testing, will
-        add more function along with the development.
+        add more function along with the development
         """
         pass
 
     @abc.abstractmethod
     def delete(self, listener, vip):
-        """Delete the listener on the vip.
+        """Delete the listener on the vip
 
         :param listener: listener object,
-                         need to use its protocol_port property
+        need to use its protocol_port property
         :type listener: object
         :param vip: vip object, need to use its ip_address property
         :type vip: object
         :returns: return a value list (listener, vip, status flag--delete)
 
         At this moment, we just build the basic structure for testing, will
-        add more function along with the development.
+        add more function along with the development
         """
         pass
 
     @abc.abstractmethod
     def get_info(self, amphora):
-        """Returns information about the amphora.
+        """Returns information about the amphora
 
         :param amphora: amphora object, need to use its id property
         :type amphora: object
@@ -123,38 +104,39 @@ class AmphoraLoadBalancerDriver(object):
 
     @abc.abstractmethod
     def get_diagnostics(self, amphora):
-        """Return ceilometer ready diagnostic data.
+        """Return ceilometer ready health
 
         :param amphora: amphora object, need to use its id property
         :type amphora: object
         :returns: return a value list (amphora.id, status flag--'ge
-                  t_diagnostics')
+        t_diagnostics')
 
         At this moment, we just build the basic structure for testing, will
         add more function along with the development, eventually, we want it
         run some expensive self tests to determine if the amphora and the lbs
         are healthy the idea is that those tests are triggered more infrequent
-        than the health gathering.
+        than the health gathering
         """
         pass
 
     @abc.abstractmethod
     def finalize_amphora(self, amphora):
-        """Finalize the amphora before any listeners are configured.
+        """It is called before listeners configured while amphora was built
 
         :param amphora: amphora object, need to use its id property
         :type amphora: object
-        :returns: None
+        :returns: return a value list (amphora.id, status flag--'ge
+        t_diagnostics')
 
         At this moment, we just build the basic structure for testing, will
-        add more function along with the development. This is a hook for
-        drivers who need to do additional work before an amphora becomes ready
-        to accept listeners. Please keep in mind that amphora might be kept in
-        an offline pool after this call.
+        add more function along with the development, eventually, we want it
+        run some expensive self tests to determine if the amphora and the lbs
+        are healthy the idea is that those tests are triggered more infrequent
+        than the health gathering
         """
         pass
 
-    def post_vip_plug(self, amphora, load_balancer, amphorae_network_config):
+    def post_vip_plug(self, load_balancer, amphorae_network_config):
         """Called after network driver has allocated and plugged the VIP
 
         :param load_balancer: A load balancer that just had its vip allocated
@@ -165,9 +147,6 @@ class AmphoraLoadBalancerDriver(object):
                                         amphorae owns.
         :type vip_network: octavia.network.data_models.AmphoraNetworkConfig
         :returns: None
-
-        This is to do any additional work needed on the amphorae to plug
-        the vip, such as bring up interfaces.
         """
         pass
 
@@ -187,33 +166,36 @@ class AmphoraLoadBalancerDriver(object):
         pass
 
     def start_health_check(self, health_mixin):
-        """Start health checks.
+        """start check health
+
 
         :param health_mixin: health mixin object
         :type amphora: object
 
-        Starts listener process and calls HealthMixin to update
+        Start listener process and  calls HealthMixin to update
         databases information.
         """
         pass
 
     def stop_health_check(self):
-        """Stop health checks.
+        """stop check health
 
-        Stops listener process and calls HealthMixin to update
+
+        Stop listener process and  calls HealthMixin to update
         databases information.
         """
         pass
 
     def upload_cert_amp(self, amphora, pem_file):
-        """Upload cert info to the amphora.
+        """upload cert info to amphora
+
 
         :param amphora: amphora object, needs id and network ip(s)
         :type amphora: object
         :param pem_file: a certificate file
         :type pem_file: file object
 
-        Upload cert file to amphora for Controller Communication.
+        upload cert file to amphora for Controller Communication
         """
         pass
 
@@ -300,13 +282,5 @@ class VRRPDriverMixin(object):
         """Reload the VRRP services of all amphorae of the loadbalancer
 
         :param loadbalancer: loadbalancer object
-        """
-        pass
-
-    @abc.abstractmethod
-    def get_vrrp_interface(self, amphora):
-        """Get the VRRP interface object for a specific amphora
-
-        :param amphora: amphora object
         """
         pass

@@ -14,7 +14,6 @@
 
 import mock
 from oslo_config import cfg
-from oslo_config import fixture as oslo_fixture
 
 from octavia.controller.queue import endpoint
 from octavia.controller.worker import controller_worker
@@ -26,8 +25,8 @@ class TestEndpoint(base.TestCase):
     def setUp(self):
         super(TestEndpoint, self).setUp()
 
-        conf = self.useFixture(oslo_fixture.Config(cfg.CONF))
-        conf.config(octavia_plugins='hot_plug_plugin')
+        cfg.CONF.import_group('controller_worker', 'octavia.common.config')
+        cfg.CONF.set_override('octavia_plugins', 'hot_plug_plugin')
 
         mock_class = mock.create_autospec(controller_worker.ControllerWorker)
         self.worker_patcher = mock.patch('octavia.controller.queue.endpoint.'
@@ -55,16 +54,6 @@ class TestEndpoint(base.TestCase):
         self.ep.delete_load_balancer(self.context, self.resource_id)
         self.ep.worker.delete_load_balancer.assert_called_once_with(
             self.resource_id, False)
-
-    def test_failover_load_balancer(self):
-        self.ep.failover_load_balancer(self.context, self.resource_id)
-        self.ep.worker.failover_loadbalancer.assert_called_once_with(
-            self.resource_id)
-
-    def test_failover_amphora(self):
-        self.ep.failover_amphora(self.context, self.resource_id)
-        self.ep.worker.failover_amphora.assert_called_once_with(
-            self.resource_id)
 
     def test_create_listener(self):
         self.ep.create_listener(self.context, self.resource_id)
@@ -124,12 +113,6 @@ class TestEndpoint(base.TestCase):
                               self.resource_updates)
         self.ep.worker.update_member.assert_called_once_with(
             self.resource_id, self.resource_updates)
-
-    def test_batch_update_members(self):
-        self.ep.batch_update_members(
-            self.context, [9], [11], [self.resource_updates])
-        self.ep.worker.batch_update_members.assert_called_once_with(
-            [9], [11], [self.resource_updates])
 
     def test_delete_member(self):
         self.ep.delete_member(self.context, self.resource_id)

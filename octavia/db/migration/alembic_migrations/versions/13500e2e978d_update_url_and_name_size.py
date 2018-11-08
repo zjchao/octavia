@@ -20,12 +20,12 @@ Create Date: 2014-09-18 16:07:04.859812
 
 '''
 
-from alembic import op
-import sqlalchemy as sa
-
 # revision identifiers, used by Alembic.
 revision = '13500e2e978d'
 down_revision = '4c094013699a'
+
+from alembic import op
+import sqlalchemy as sa
 
 
 def upgrade():
@@ -41,3 +41,18 @@ def upgrade():
                     existing_type=sa.String(255))
     op.alter_column(u'session_persistence_type', u'name',
                     existing_type=sa.String(255))
+
+
+def downgrade():
+    op.alter_column(u'provisioning_status', u'name',
+                    existing_type=sa.String(30))
+    op.alter_column(u'operating_status', u'name',
+                    existing_type=sa.String(30))
+    op.alter_column(u'health_monitor_type', u'name',
+                    existing_type=sa.String(30))
+    op.alter_column(u'protocol', u'name',
+                    existing_type=sa.String(30))
+    op.alter_column(u'algorithm', u'name',
+                    existing_type=sa.String(30))
+    op.alter_column(u'session_persistence_type', u'name',
+                    existing_type=sa.String(30))

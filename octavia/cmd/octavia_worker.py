@@ -14,10 +14,11 @@
 
 import sys
 
-import cotyledon
-from cotyledon import oslo_config_glue
+import eventlet
+eventlet.monkey_patch()
 from oslo_config import cfg
 from oslo_reports import guru_meditation_report as gmr
+from oslo_service import service
 
 from octavia.common import service as octavia_service
 from octavia.controller.queue import consumer
@@ -31,8 +32,5 @@ def main():
 
     gmr.TextGuruMeditation.setup_autorun(version)
 
-    sm = cotyledon.ServiceManager()
-    sm.add(consumer.ConsumerService, workers=CONF.controller_worker.workers,
-           args=(CONF,))
-    oslo_config_glue.setup(sm, CONF, reload_method="mutate")
-    sm.run()
+    launcher = service.launch(CONF, consumer.Consumer())
+    launcher.wait()

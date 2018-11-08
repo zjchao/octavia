@@ -15,7 +15,6 @@
 import mock
 from novaclient import exceptions as nova_exceptions
 from oslo_config import cfg
-from oslo_config import fixture as oslo_fixture
 from oslo_utils import uuidutils
 
 from octavia.common import clients
@@ -36,19 +35,18 @@ class Test_GetImageUuid(base.TestCase):
         with mock.patch.object(nova_common,
                                '_extract_amp_image_id_by_tag',
                                return_value='fakeid') as extract:
-            image_id = nova_common._get_image_uuid(client, '', 'faketag', None)
+            image_id = nova_common._get_image_uuid(client, '', 'faketag')
         self.assertEqual('fakeid', image_id)
-        extract.assert_called_with(client, 'faketag', None)
+        extract.assert_called_with(client, 'faketag')
 
     def test__get_image_uuid_notag(self):
         client = mock.Mock()
-        image_id = nova_common._get_image_uuid(client, 'fakeid', '', None)
+        image_id = nova_common._get_image_uuid(client, 'fakeid', '')
         self.assertEqual('fakeid', image_id)
 
     def test__get_image_uuid_id_beats_tag(self):
         client = mock.Mock()
-        image_id = nova_common._get_image_uuid(client, 'fakeid',
-                                               'faketag', None)
+        image_id = nova_common._get_image_uuid(client, 'fakeid', 'faketag')
         self.assertEqual('fakeid', image_id)
 
 
@@ -64,8 +62,7 @@ class Test_ExtractAmpImageIdByTag(base.TestCase):
         self.client.images.list.return_value = []
         self.assertRaises(
             exceptions.GlanceNoTaggedImages,
-            nova_common._extract_amp_image_id_by_tag, self.client,
-            'faketag', None)
+            nova_common._extract_amp_image_id_by_tag, self.client, 'faketag')
 
     def test_single_image(self):
         images = [
@@ -73,7 +70,7 @@ class Test_ExtractAmpImageIdByTag(base.TestCase):
         ]
         self.client.images.list.return_value = images
         image_id = nova_common._extract_amp_image_id_by_tag(self.client,
-                                                            'faketag', None)
+                                                            'faketag')
         self.assertIn(image_id, images[0]['id'])
 
     def test_multiple_images_returns_one_of_images(self):
@@ -83,36 +80,31 @@ class Test_ExtractAmpImageIdByTag(base.TestCase):
         ]
         self.client.images.list.return_value = images
         image_id = nova_common._extract_amp_image_id_by_tag(self.client,
-                                                            'faketag', None)
+                                                            'faketag')
         self.assertIn(image_id, [image['id'] for image in images])
 
 
 class TestNovaClient(base.TestCase):
 
     def setUp(self):
-        conf = self.useFixture(oslo_fixture.Config(cfg.CONF))
-        self.conf = conf
+        CONF.set_override(group='keystone_authtoken', name='auth_version',
+                          override='2', enforce_type=True)
         self.net_name = "lb-mgmt-net"
-        conf.config(group="controller_worker",
-                    amp_boot_network_list=['1', '2'])
-        self.conf = conf
+        CONF.set_override(group='networking', name='lb_network_name',
+                          override=self.net_name, enforce_type=True)
 
         self.amphora = models.Amphora(
             compute_id=uuidutils.generate_uuid(),
             status='ACTIVE',
-            lb_network_ip='10.0.0.1',
-            image_id=uuidutils.generate_uuid()
+            lb_network_ip='10.0.0.1'
         )
 
         self.nova_response = mock.Mock()
         self.nova_response.id = self.amphora.compute_id
         self.nova_response.status = 'ACTIVE'
-        self.nova_response.fault = 'FAKE_FAULT'
-        setattr(self.nova_response, 'OS-EXT-AZ:availability_zone', None)
-        self.nova_response.image = {'id': self.amphora.image_id}
 
         self.interface_list = mock.MagicMock()
-        self.interface_list.net_id = '1'
+        self.interface_list.net_id = CONF.controller_worker.amp_network
         self.interface_list.fixed_ips = [mock.MagicMock()]
         self.interface_list.fixed_ips[0] = {'ip_address': '10.0.0.1'}
 
@@ -144,10 +136,6 @@ class TestNovaClient(base.TestCase):
         self.server_group_mock.policy = self.server_group_policy
         self.server_group_mock.id = self.server_group_id
 
-        self.port_id = uuidutils.generate_uuid()
-        self.compute_id = uuidutils.generate_uuid()
-        self.network_id = uuidutils.generate_uuid()
-
         super(TestNovaClient, self).setUp()
 
     def test_build(self):
@@ -171,73 +159,7 @@ class TestNovaClient(base.TestCase):
             files='Files Blah',
             userdata='Blah',
             config_drive=True,
-            scheduler_hints=None,
-            availability_zone=None
-        )
-
-    def test_build_with_availability_zone(self):
-        FAKE_AZ = "my_availability_zone"
-        self.conf.config(group="nova", availability_zone=FAKE_AZ)
-
-        amphora_id = self.manager.build(amphora_flavor=1, image_id=1,
-                                        key_name=1,
-                                        sec_groups=1,
-                                        network_ids=[1],
-                                        port_ids=[2],
-                                        user_data='Blah',
-                                        config_drive_files='Files Blah')
-
-        self.assertEqual(self.amphora.compute_id, amphora_id)
-
-        self.manager.manager.create.assert_called_with(
-            name="amphora_name",
-            nics=[{'net-id': 1}, {'port-id': 2}],
-            image=1,
-            flavor=1,
-            key_name=1,
-            security_groups=1,
-            files='Files Blah',
-            userdata='Blah',
-            config_drive=True,
-            scheduler_hints=None,
-            availability_zone=FAKE_AZ
-        )
-
-    def test_build_with_random_amphora_name_length(self):
-        self.conf.config(group="nova", random_amphora_name_length=15)
-        self.addCleanup(self.conf.config,
-                        group='nova', random_amphora_name_length=0)
-
-        self.manager.build(name="b" * 50, image_id=1)
-        self.assertEqual(
-            15, len(self.manager.manager.create.call_args[1]['name']))
-
-    def test_build_with_default_boot_network(self):
-        self.conf.config(group="controller_worker",
-                         amp_boot_network_list='')
-        amphora_id = self.manager.build(amphora_flavor=1, image_id=1,
-                                        key_name=1,
-                                        sec_groups=1,
-                                        network_ids=None,
-                                        port_ids=[2],
-                                        user_data='Blah',
-                                        config_drive_files='Files Blah')
-
-        self.assertEqual(self.amphora.compute_id, amphora_id)
-
-        self.manager.manager.create.assert_called_with(
-            name="amphora_name",
-            nics=[{'port-id': 2}],
-            image=1,
-            flavor=1,
-            key_name=1,
-            security_groups=1,
-            files='Files Blah',
-            userdata='Blah',
-            config_drive=True,
-            scheduler_hints=None,
-            availability_zone=None
-        )
+            scheduler_hints=None)
 
     def test_bad_build(self):
         self.manager.manager.create.side_effect = Exception
@@ -277,9 +199,8 @@ class TestNovaClient(base.TestCase):
                           self.manager.status, self.amphora.id)
 
     def test_get_amphora(self):
-        amphora, fault = self.manager.get_amphora(self.amphora.compute_id)
+        amphora = self.manager.get_amphora(self.amphora.compute_id)
         self.assertEqual(self.amphora, amphora)
-        self.assertEqual(self.nova_response.fault, fault)
         self.manager.manager.get.called_with(server=amphora.id)
 
     def test_bad_get_amphora(self):
@@ -288,24 +209,24 @@ class TestNovaClient(base.TestCase):
                           self.manager.get_amphora, self.amphora.id)
 
     def test_translate_amphora(self):
-        amphora, fault = self.manager._translate_amphora(self.nova_response)
+        amphora = self.manager._translate_amphora(self.nova_response)
         self.assertEqual(self.amphora, amphora)
-        self.assertEqual(self.nova_response.fault, fault)
-        self.nova_response.interface_list.called_with()
-
-    def test_translate_amphora_no_availability_zone(self):
-        delattr(self.nova_response, 'OS-EXT-AZ:availability_zone')
-        amphora, fault = self.manager._translate_amphora(self.nova_response)
-        self.assertEqual(self.amphora, amphora)
-        self.assertEqual(self.nova_response.fault, fault)
         self.nova_response.interface_list.called_with()
 
     def test_bad_translate_amphora(self):
         self.nova_response.interface_list.side_effect = Exception
         self.manager._nova_client.networks.get.side_effect = Exception
-        amphora, fault = self.manager._translate_amphora(self.nova_response)
-        self.assertIsNone(amphora.lb_network_ip)
+        self.assertIsNone(
+            self.manager._translate_amphora(self.nova_response).lb_network_ip)
         self.nova_response.interface_list.called_with()
+
+    def test_translate_amphora_nova_networks(self):
+        self.nova_response.interface_list.side_effect = Exception
+        self.manager._nova_client.networks.get.return_value = self.nova_network
+        amphora = self.manager._translate_amphora(self.nova_response)
+        self.assertEqual(self.amphora, amphora)
+        self.assertTrue(self.nova_response.interface_list.called)
+        self.manager._nova_client.networks.get.called_with(self.net_name)
 
     def test_create_server_group(self):
         self.manager.server_groups.create.return_value = self.server_group_mock
@@ -346,28 +267,3 @@ class TestNovaClient(base.TestCase):
                           self.manager.delete_server_group,
                           self.server_group_id)
         self.manager.server_groups.delete.called_with(self.server_group_id)
-
-    def test_attach_network_or_port(self):
-        self.manager.attach_network_or_port(self.compute_id,
-                                            self.network_id)
-        self.manager.manager.interface_attach.assert_called_with(
-            server=self.compute_id, net_id=self.network_id, fixed_ip=None,
-            port_id=None)
-
-    def test_attach_network_or_port_exception(self):
-        self.manager.manager.interface_attach.side_effect = [
-            nova_exceptions.NotFound('test_exception')]
-        self.assertRaises(nova_exceptions.NotFound,
-                          self.manager.attach_network_or_port,
-                          self.compute_id, self.network_id)
-
-    def test_detach_network(self):
-        self.manager.detach_port(self.compute_id,
-                                 self.port_id)
-        self.manager.manager.interface_detach.assert_called_with(
-            server=self.compute_id, port_id=self.port_id)
-
-    def test_detach_network_with_exception(self):
-        self.manager.manager.interface_detach.side_effect = [Exception]
-        self.manager.detach_port(self.compute_id,
-                                 self.port_id)

@@ -15,7 +15,6 @@
 
 import mock
 from oslo_config import cfg
-from oslo_config import fixture as oslo_fixture
 
 from octavia.amphorae.drivers.keepalived.jinja import jinja_cfg
 from octavia.common import constants
@@ -26,14 +25,6 @@ class TestVRRPRestDriver(base.TestCase):
 
     def setUp(self):
         super(TestVRRPRestDriver, self).setUp()
-        conf = self.useFixture(oslo_fixture.Config(cfg.CONF))
-        conf.config(group="haproxy_amphora", base_path='/tmp/test')
-        conf.config(group="keepalived_vrrp", vrrp_garp_refresh_interval=5)
-        conf.config(group="keepalived_vrrp", vrrp_garp_refresh_count=2)
-        conf.config(group="keepalived_vrrp", vrrp_check_interval=5)
-        conf.config(group="keepalived_vrrp", vrrp_fail_count=2)
-        conf.config(group="keepalived_vrrp", vrrp_success_count=2)
-
         self.templater = jinja_cfg.KeepalivedJinjaTemplater()
 
         self.amphora1 = mock.MagicMock()
@@ -60,7 +51,9 @@ class TestVRRPRestDriver(base.TestCase):
         self.lb.vip.ip_address = '10.1.0.5'
         self.lb.vrrp_group.advert_int = 10
 
-        self.ref_conf = ("vrrp_script check_script {\n"
+        self.ref_conf = ("\n"
+                         "\n"
+                         "vrrp_script check_script {\n"
                          "  script /tmp/test/vrrp/check_script.sh\n"
                          "  interval 5\n"
                          "  fall 2\n"
@@ -68,32 +61,45 @@ class TestVRRPRestDriver(base.TestCase):
                          "}\n"
                          "\n"
                          "vrrp_instance TESTGROUP {\n"
-                         "  state MASTER\n"
-                         "  interface eth1\n"
-                         "  virtual_router_id 1\n"
-                         "  priority 100\n"
-                         "  nopreempt\n"
-                         "  garp_master_refresh 5\n"
-                         "  garp_master_refresh_repeat 2\n"
-                         "  advert_int 10\n"
-                         "  authentication {\n"
-                         "    auth_type PASS\n"
-                         "    auth_pass TESTPASSWORD\n"
-                         "  }\n"
+                         " state MASTER\n"
+                         " interface eth1\n"
+                         " virtual_router_id 1\n"
+                         " priority 100\n"
+                         " nopreempt\n"
+                         " garp_master_refresh 5\n"
+                         " garp_master_refresh_repeat 2\n"
+                         " advert_int 10\n"
+                         " authentication {\n"
+                         "  auth_type PASS\n"
+                         "  auth_pass TESTPASSWORD\n"
+                         " }\n"
                          "\n"
-                         "  unicast_src_ip 10.0.0.1\n"
-                         "  unicast_peer {\n"
-                         "    10.0.0.2\n"
-                         "  }\n"
+                         " unicast_src_ip 10.0.0.1\n"
+                         " unicast_peer {\n"
+                         "       10.0.0.2\n"
                          "\n"
-                         "  virtual_ipaddress {\n"
-                         "    10.1.0.5\n"
-                         "  }\n"
-                         "  track_script {\n"
+                         " }\n"
+                         "\n"
+                         " virtual_ipaddress {\n"
+                         "  10.1.0.5\n"
+                         " }\n"
+                         " track_script {\n"
                          "    check_script\n"
-                         "  }\n"
+                         " }\n"
                          "}\n")
 
     def test_build_keepalived_config(self):
+        cfg.CONF.set_override('vrrp_garp_refresh_interval', 5,
+                              group='keepalived_vrrp')
+        cfg.CONF.set_override('vrrp_garp_refresh_count', 2,
+                              group='keepalived_vrrp')
+        cfg.CONF.set_override('vrrp_check_interval', 5,
+                              group='keepalived_vrrp')
+        cfg.CONF.set_override('vrrp_fail_count', 2,
+                              group='keepalived_vrrp')
+        cfg.CONF.set_override('vrrp_success_count', 2,
+                              group='keepalived_vrrp')
+        cfg.CONF.set_override('base_path', '/tmp/test/',
+                              group='haproxy_amphora')
         config = self.templater.build_keepalived_config(self.lb, self.amphora1)
         self.assertEqual(self.ref_conf, config)

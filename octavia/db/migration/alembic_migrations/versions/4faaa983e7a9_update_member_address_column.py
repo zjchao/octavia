@@ -20,14 +20,19 @@ Create Date: 2014-09-29 11:22:16.565071
 
 """
 
-from alembic import op
-import sqlalchemy as sa
-
 # revision identifiers, used by Alembic.
 revision = '4faaa983e7a9'
 down_revision = '13500e2e978d'
 
+from alembic import op
+import sqlalchemy as sa
+
 
 def upgrade():
     op.alter_column(u'member', u'address', new_column_name=u'ip_address',
+                    existing_type=sa.String(64))
+
+
+def downgrade():
+    op.alter_column(u'member', u'ip_address', new_column_name=u'address',
                     existing_type=sa.String(64))

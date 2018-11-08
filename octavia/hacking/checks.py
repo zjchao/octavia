@@ -14,6 +14,8 @@
 
 import re
 
+import pep8
+import six
 
 """
 Guidelines for writing new hacking checks
@@ -30,17 +32,28 @@ Guidelines for writing new hacking checks
 
 """
 
+log_translation = re.compile(
+    r"(.)*LOG\.(audit|error|info|warn|warning|critical|exception)\(\s*('|\")")
 author_tag_re = (re.compile("^\s*#\s*@?(a|A)uthor"),
                  re.compile("^\.\.\s+moduleauthor::"))
-
-_all_log_levels = {'critical', 'error', 'exception', 'info', 'warning'}
-_all_hints = {'_LC', '_LE', '_LI', '_', '_LW'}
-
-_log_translation_hint = re.compile(
-    r".*LOG\.(%(levels)s)\(\s*(%(hints)s)\(" % {
-        'levels': '|'.join(_all_log_levels),
-        'hints': '|'.join(_all_hints),
-    })
+_all_hints = set(['_', '_LI', '_LE', '_LW', '_LC'])
+_all_log_levels = {
+    # NOTE(yamamoto): Following nova which uses _() for audit.
+    'audit': '_',
+    'error': '_LE',
+    'info': '_LI',
+    'warn': '_LW',
+    'warning': '_LW',
+    'critical': '_LC',
+    'exception': '_LE',
+}
+log_translation_hints = []
+for level, hint in six.iteritems(_all_log_levels):
+    r = "(.)*LOG\.%(level)s\(\s*((%(wrong_hints)s)\(|'|\")" % {
+        'level': level,
+        'wrong_hints': '|'.join(_all_hints - set([hint])),
+    }
+    log_translation_hints.append(re.compile(r))
 
 assert_trueinst_re = re.compile(
     r"(.)*assertTrue\(isinstance\((\w|\.|\'|\"|\[|\])+, "
@@ -62,19 +75,10 @@ assert_not_equal_start_with_none_re = re.compile(
     r"(.)*assertNotEqual\(None, .+\)")
 assert_no_xrange_re = re.compile(
     r"\s*xrange\s*\(")
-revert_must_have_kwargs_re = re.compile(
-    r'[ ]*def revert\(.+,[ ](?!\*\*kwargs)\w+\):')
-untranslated_exception_re = re.compile(r"raise (?:\w*)\((.*)\)")
-no_basestring_re = re.compile(r"\bbasestring\b")
-no_iteritems_re = re.compile(r".*\.iteritems\(\)")
-no_eventlet_re = re.compile(r'(import|from)\s+[(]?eventlet')
-no_line_continuation_backslash_re = re.compile(r'.*(\\)\n')
-no_logging_re = re.compile(r'(import|from)\s+[(]?logging')
 
 
-def _translation_checks_not_enforced(filename):
-    # Do not do these validations on tests
-    return any(pat in filename for pat in ["/tests/", "rally-jobs/plugins/"])
+def _directory_to_check_translation(filename):
+    return True
 
 
 def assert_true_instance(logical_line):
@@ -83,8 +87,7 @@ def assert_true_instance(logical_line):
     O316
     """
     if assert_trueinst_re.match(logical_line):
-        yield (0, "O316: assertTrue(isinstance(a, b)) sentences not allowed. "
-               "Use assertIsInstance instead.")
+        yield (0, "O316: assertTrue(isinstance(a, b)) sentences not allowed")
 
 
 def assert_equal_or_not_none(logical_line):
@@ -104,6 +107,58 @@ def assert_equal_or_not_none(logical_line):
         yield (0, msg)
 
 
+def no_translate_debug_logs(logical_line, filename):
+    """Check for 'LOG.debug(_('
+
+    As per our translation policy,
+    https://wiki.openstack.org/wiki/LoggingStandards#Log_Translation
+    we shouldn't translate debug level logs.
+
+    * This check assumes that 'LOG' is a logger.
+    O319
+    """
+    if _directory_to_check_translation(filename) and logical_line.startswith(
+            "LOG.debug(_("):
+        yield(0, "O319 Don't translate debug level logs")
+
+
+def validate_log_translations(logical_line, physical_line, filename):
+    # Translations are not required in the test directory
+    if "octavia/tests" in filename:
+        return
+    if pep8.noqa(physical_line):
+        return
+    msg = "O320: Log messages require translations!"
+    if log_translation.match(logical_line):
+        yield (0, msg)
+
+    if _directory_to_check_translation(filename):
+        msg = "O320: Log messages require translation hints!"
+        for log_translation_hint in log_translation_hints:
+            if log_translation_hint.match(logical_line):
+                yield (0, msg)
+
+
+def use_jsonutils(logical_line, filename):
+    msg = "O321: jsonutils.%(fun)s must be used instead of json.%(fun)s"
+
+    # Some files in the tree are not meant to be run from inside Octavia
+    # itself, so we should not complain about them not using jsonutils
+    json_check_skipped_patterns = [
+    ]
+
+    for pattern in json_check_skipped_patterns:
+        if pattern in filename:
+            return
+
+    if "json." in logical_line:
+        json_funcs = ['dumps(', 'dump(', 'loads(', 'load(']
+        for f in json_funcs:
+            pos = logical_line.find('json.%s' % f)
+            if pos != -1:
+                yield (pos, msg % {'fun': f[:-1]})
+
+
 def no_author_tags(physical_line):
     for regex in author_tag_re:
         if regex.match(physical_line):
@@ -112,7 +167,6 @@ def no_author_tags(physical_line):
             if pos < 0:
                 pos = physical_line.find('author')
             return pos, "O322: Don't use author tags"
-    return None
 
 
 def assert_equal_true_or_false(logical_line):
@@ -166,157 +220,15 @@ def no_xrange(logical_line):
         yield(0, "O340: Do not use xrange().")
 
 
-def no_translate_logs(logical_line, filename):
-    """O341 - Don't translate logs.
-
-    Check for 'LOG.*(_(' and 'LOG.*(_Lx('
-
-    Translators don't provide translations for log messages, and operators
-    asked not to translate them.
-
-    * This check assumes that 'LOG' is a logger.
-
-    :param logical_line: The logical line to check.
-    :param filename: The file name where the logical line exists.
-    :returns: None if the logical line passes the check, otherwise a tuple
-              is yielded that contains the offending index in logical line
-              and a message describe the check validation failure.
-    """
-    if _translation_checks_not_enforced(filename):
-        return
-
-    msg = "O341: Log messages should not be translated!"
-    match = _log_translation_hint.match(logical_line)
-    if match:
-        yield (logical_line.index(match.group()), msg)
-
-
-def check_raised_localized_exceptions(logical_line, filename):
-    """O342 - Untranslated exception message.
-
-    :param logical_line: The logical line to check.
-    :param filename: The file name where the logical line exists.
-    :returns: None if the logical line passes the check, otherwise a tuple
-              is yielded that contains the offending index in logical line
-              and a message describe the check validation failure.
-    """
-    if _translation_checks_not_enforced(filename):
-        return
-
-    logical_line = logical_line.strip()
-    raised_search = untranslated_exception_re.match(logical_line)
-    if raised_search:
-        exception_msg = raised_search.groups()[0]
-        if exception_msg.startswith("\"") or exception_msg.startswith("\'"):
-            msg = "O342: Untranslated exception message."
-            yield (logical_line.index(exception_msg), msg)
-
-
-def check_no_basestring(logical_line):
-    """O343 - basestring is not Python3-compatible.
-
-    :param logical_line: The logical line to check.
-    :returns: None if the logical line passes the check, otherwise a tuple
-              is yielded that contains the offending index in logical line
-              and a message describe the check validation failure.
-    """
-    if no_basestring_re.search(logical_line):
-        msg = ("O343: basestring is not Python3-compatible, use "
-               "six.string_types instead.")
-        yield(0, msg)
-
-
-def check_python3_no_iteritems(logical_line):
-    """O344 - Use dict.items() instead of dict.iteritems().
-
-    :param logical_line: The logical line to check.
-    :returns: None if the logical line passes the check, otherwise a tuple
-              is yielded that contains the offending index in logical line
-              and a message describe the check validation failure.
-    """
-    if no_iteritems_re.search(logical_line):
-        msg = ("O344: Use dict.items() instead of dict.iteritems() to be "
-               "compatible with both Python 2 and Python 3. In Python 2, "
-               "dict.items() may be inefficient for very large dictionaries. "
-               "If you can prove that you need the optimization of an "
-               "iterator for Python 2, then you can use six.iteritems(dict).")
-        yield(0, msg)
-
-
-def check_no_eventlet_imports(logical_line):
-    """O345 - Usage of Python eventlet module not allowed.
-
-    :param logical_line: The logical line to check.
-    :returns: None if the logical line passes the check, otherwise a tuple
-              is yielded that contains the offending index in logical line
-              and a message describe the check validation failure.
-    """
-    if no_eventlet_re.match(logical_line):
-        msg = 'O345 Usage of Python eventlet module not allowed'
-        yield logical_line.index('eventlet'), msg
-
-
-def check_line_continuation_no_backslash(logical_line, tokens):
-    """O346 - Don't use backslashes for line continuation.
-
-    :param logical_line: The logical line to check. Not actually used.
-    :param tokens: List of tokens to check.
-    :returns: None if the tokens don't contain any issues, otherwise a tuple
-              is yielded that contains the offending index in the logical
-              line and a message describe the check validation failure.
-    """
-    backslash = None
-    for token_type, text, start, end, orig_line in tokens:
-        m = no_line_continuation_backslash_re.match(orig_line)
-        if m:
-            backslash = (start[0], m.start(1))
-            break
-
-    if backslash is not None:
-        msg = 'O346 Backslash line continuations not allowed'
-        yield backslash, msg
-
-
-def revert_must_have_kwargs(logical_line):
-    """O347 - Taskflow revert methods must have \*\*kwargs.
-
-    :param logical_line: The logical line to check.
-    :returns: None if the logical line passes the check, otherwise a tuple
-              is yielded that contains the offending index in logical line
-              and a message describe the check validation failure.
-    """
-    if revert_must_have_kwargs_re.match(logical_line):
-        msg = 'O347 Taskflow revert methods must have **kwargs'
-        yield 0, msg
-
-
-def check_no_logging_imports(logical_line):
-    """O348 - Usage of Python logging module not allowed.
-
-    :param logical_line: The logical line to check.
-    :returns: None if the logical line passes the check, otherwise a tuple
-              is yielded that contains the offending index in logical line
-              and a message describe the check validation failure.
-    """
-    if no_logging_re.match(logical_line):
-        msg = 'O348 Usage of Python logging module not allowed, use oslo_log'
-        yield logical_line.index('logging'), msg
-
-
 def factory(register):
     register(assert_true_instance)
     register(assert_equal_or_not_none)
-    register(no_translate_logs)
+    register(no_translate_debug_logs)
+    register(validate_log_translations)
+    register(use_jsonutils)
     register(no_author_tags)
     register(assert_equal_true_or_false)
     register(no_mutable_default_args)
     register(assert_equal_in)
     register(no_log_warn)
     register(no_xrange)
-    register(check_raised_localized_exceptions)
-    register(check_no_basestring)
-    register(check_python3_no_iteritems)
-    register(check_no_eventlet_imports)
-    register(check_line_continuation_no_backslash)
-    register(revert_must_have_kwargs)
-    register(check_no_logging_imports)

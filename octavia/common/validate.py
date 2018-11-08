@@ -18,53 +18,24 @@ Several handy validation functions that go beyond simple type checking.
 Defined here so these can also be used at deeper levels than the API.
 """
 
-
-import ipaddress
 import re
 
-import netaddr
-from oslo_config import cfg
 import rfc3986
-import six
 
 from octavia.common import constants
 from octavia.common import exceptions
-from octavia.common import utils
-from octavia.i18n import _
-
-CONF = cfg.CONF
 
 
-def url(url, require_scheme=True):
+def url(url):
     """Raises an error if the url doesn't look like a URL."""
     try:
-        if not rfc3986.is_valid_uri(url, require_scheme=require_scheme):
+        if not rfc3986.is_valid_uri(url, require_scheme=True):
             raise exceptions.InvalidURL(url=url)
         p_url = rfc3986.urlparse(rfc3986.normalize_uri(url))
-        if require_scheme:
-            if p_url.scheme != 'http' and p_url.scheme != 'https':
-                raise exceptions.InvalidURL(url=url)
+        if p_url.scheme != 'http' and p_url.scheme != 'https':
+            raise exceptions.InvalidURL(url=url)
     except Exception:
         raise exceptions.InvalidURL(url=url)
-    return True
-
-
-def url_path(url_path):
-    """Raises an error if the url_path doesn't look like a URL Path."""
-    try:
-        p_url = rfc3986.urlparse(rfc3986.normalize_uri(url_path))
-
-        invalid_path = (
-            p_url.scheme or p_url.userinfo or p_url.host or
-            p_url.port or
-            p_url.path is None or
-            not p_url.path.startswith('/')
-        )
-
-        if invalid_path:
-            raise exceptions.InvalidURLPath(url_path=url_path)
-    except Exception:
-        raise exceptions.InvalidURLPath(url_path=url_path)
     return True
 
 
@@ -189,48 +160,34 @@ def sanitize_l7policy_api_args(l7policy, create=False):
             l7policy.update({'redirect_pool_id': None})
             l7policy.pop('redirect_pool', None)
         elif l7policy['action'] == constants.L7POLICY_ACTION_REDIRECT_TO_POOL:
-            if (not l7policy.get('redirect_pool_id') and
-                    not l7policy.get('redirect_pool')):
+            if (not l7policy.get('redirect_pool_id')
+                    and not l7policy.get('redirect_pool')):
                 raise exceptions.InvalidL7PolicyArgs(
                     msg='redirect_pool_id or redirect_pool must not be None')
             l7policy.update({'redirect_url': None})
-        elif l7policy['action'] == constants.L7POLICY_ACTION_REDIRECT_PREFIX:
-            if not l7policy.get('redirect_prefix'):
-                raise exceptions.InvalidL7PolicyArgs(
-                    msg='redirect_prefix must not be None')
         else:
             raise exceptions.InvalidL7PolicyAction(
                 action=l7policy['action'])
-    if ((l7policy.get('redirect_pool_id') or l7policy.get('redirect_pool')) and
-            (l7policy.get('redirect_url') or l7policy.get('redirect_prefix'))):
+    if ((l7policy.get('redirect_pool_id') or
+            l7policy.get('redirect_pool')) and l7policy.get('redirect_url')):
         raise exceptions.InvalidL7PolicyArgs(
-            msg='Cannot specify redirect_pool_id and redirect_url or '
-                'redirect_prefix at the same time')
+            msg='Cannot specify redirect_pool_id and redirect_url '
+                'at the same time')
     if l7policy.get('redirect_pool_id'):
         l7policy.update({
             'action': constants.L7POLICY_ACTION_REDIRECT_TO_POOL})
         l7policy.update({'redirect_url': None})
         l7policy.pop('redirect_pool', None)
-        l7policy.update({'redirect_prefix': None})
     if l7policy.get('redirect_pool'):
         l7policy.update({
             'action': constants.L7POLICY_ACTION_REDIRECT_TO_POOL})
         l7policy.update({'redirect_url': None})
         l7policy.pop('redirect_pool_id', None)
-        l7policy.update({'redirect_prefix': None})
     if l7policy.get('redirect_url'):
         url(l7policy['redirect_url'])
         l7policy.update({
             'action': constants.L7POLICY_ACTION_REDIRECT_TO_URL})
         l7policy.update({'redirect_pool_id': None})
-        l7policy.update({'redirect_prefix': None})
-        l7policy.pop('redirect_pool', None)
-    if l7policy.get('redirect_prefix'):
-        url(l7policy['redirect_prefix'])
-        l7policy.update({
-            'action': constants.L7POLICY_ACTION_REDIRECT_PREFIX})
-        l7policy.update({'redirect_pool_id': None})
-        l7policy.update({'redirect_url': None})
         l7policy.pop('redirect_pool', None)
 
     # If we are creating, we need an action at this point
@@ -238,111 +195,6 @@ def sanitize_l7policy_api_args(l7policy, create=False):
         raise exceptions.InvalidL7PolicyAction(action='None')
 
     # See if we have anything left after that...
-    if not l7policy.keys():
+    if len(l7policy.keys()) == 0:
         raise exceptions.InvalidL7PolicyArgs(msg='Invalid update options')
     return l7policy
-
-
-def port_exists(port_id):
-    """Raises an exception when a port does not exist."""
-    network_driver = utils.get_network_driver()
-    try:
-        port = network_driver.get_port(port_id)
-    except Exception:
-        raise exceptions.InvalidSubresource(resource='Port', id=port_id)
-    return port
-
-
-def check_port_in_use(port):
-    """Raise an exception when a port is used."""
-    if port.device_id:
-        raise exceptions.ValidationException(detail=_(
-            "Port %(port_id)s is already used by device %(device_id)s ") %
-            {'port_id': port.id, 'device_id': port.device_id})
-    return False
-
-
-def subnet_exists(subnet_id):
-    """Raises an exception when a subnet does not exist."""
-    network_driver = utils.get_network_driver()
-    try:
-        subnet = network_driver.get_subnet(subnet_id)
-    except Exception:
-        raise exceptions.InvalidSubresource(resource='Subnet', id=subnet_id)
-    return subnet
-
-
-def qos_policy_exists(qos_policy_id):
-    network_driver = utils.get_network_driver()
-    try:
-        qos_policy = network_driver.get_qos_policy(qos_policy_id)
-    except Exception:
-        raise exceptions.InvalidSubresource(resource='qos_policy',
-                                            id=qos_policy_id)
-    return qos_policy
-
-
-def network_exists_optionally_contains_subnet(network_id, subnet_id=None):
-    """Raises an exception when a network does not exist.
-
-    If a subnet is provided, also validate the network contains that subnet.
-    """
-    network_driver = utils.get_network_driver()
-    try:
-        network = network_driver.get_network(network_id)
-    except Exception:
-        raise exceptions.InvalidSubresource(resource='Network', id=network_id)
-    if subnet_id:
-        if not network.subnets or subnet_id not in network.subnets:
-            raise exceptions.InvalidSubresource(resource='Subnet',
-                                                id=subnet_id)
-    return network
-
-
-def network_allowed_by_config(network_id):
-    if CONF.networking.valid_vip_networks:
-        valid_networks = map(str.lower, CONF.networking.valid_vip_networks)
-        if network_id not in valid_networks:
-            raise exceptions.ValidationException(detail=_(
-                'Supplied VIP network_id is not allowed by the configuration '
-                'of this deployment.'))
-
-
-def is_ip_member_of_cidr(address, cidr):
-    if netaddr.IPAddress(address) in netaddr.IPNetwork(cidr):
-        return True
-    return False
-
-
-def check_session_persistence(SP_dict):
-    try:
-        if SP_dict['cookie_name']:
-            if SP_dict['type'] != constants.SESSION_PERSISTENCE_APP_COOKIE:
-                raise exceptions.ValidationException(detail=_(
-                    'Field "cookie_name" can only be specified with session '
-                    'persistence of type "APP_COOKIE".'))
-            bad_cookie_name = re.compile(r'[\x00-\x20\x22\x28-\x29\x2c\x2f'
-                                         r'\x3a-\x40\x5b-\x5d\x7b\x7d\x7f]+')
-            valid_chars = re.compile(r'[\x00-\xff]+')
-            if (bad_cookie_name.search(SP_dict['cookie_name']) or
-                    not valid_chars.search(SP_dict['cookie_name'])):
-                raise exceptions.ValidationException(detail=_(
-                    'Supplied "cookie_name" is invalid.'))
-        if (SP_dict['type'] == constants.SESSION_PERSISTENCE_APP_COOKIE and
-                not SP_dict['cookie_name']):
-            raise exceptions.ValidationException(detail=_(
-                'Field "cookie_name" must be specified when using the '
-                '"APP_COOKIE" session persistence type.'))
-    except exceptions.ValidationException:
-        raise
-    except Exception:
-        raise exceptions.ValidationException(detail=_(
-            'Invalid session_persistence provided.'))
-
-
-def ip_not_reserved(ip_address):
-    ip_address = (
-        ipaddress.ip_address(six.text_type(ip_address)).exploded.upper())
-    if ip_address in CONF.networking.reserved_ips:
-        raise exceptions.InvalidOption(value=ip_address,
-                                       option='member address')

@@ -12,51 +12,47 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import cotyledon
+from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging as messaging
-from oslo_messaging.rpc import dispatcher
+from oslo_service import service
 
 from octavia.controller.queue import endpoint
+from octavia.i18n import _LI
 
 LOG = logging.getLogger(__name__)
 
 
-class ConsumerService(cotyledon.Service):
+class Consumer(service.Service):
 
-    def __init__(self, worker_id, conf):
-        super(ConsumerService, self).__init__(worker_id)
-        self.conf = conf
-        self.topic = conf.oslo_messaging.topic
-        self.server = conf.host
-        self.endpoints = []
-        self.access_policy = dispatcher.DefaultRPCAccessPolicy
-        self.message_listener = None
+    def __init__(self):
+        super(Consumer, self).__init__()
+        self.server = None
 
-    def run(self):
-        LOG.info('Starting consumer...')
-        transport = messaging.get_rpc_transport(self.conf)
-        target = messaging.Target(topic=self.topic, server=self.server,
-                                  fanout=False)
-        self.endpoints = [endpoint.Endpoint()]
-        self.message_listener = messaging.get_rpc_server(
-            transport, target, self.endpoints,
-            executor='threading', access_policy=self.access_policy)
-        self.message_listener.start()
+    def start(self):
+        topic = cfg.CONF.oslo_messaging.topic
+        server = cfg.CONF.host
+        transport = messaging.get_transport(cfg.CONF)
+        target = messaging.Target(topic=topic, server=server, fanout=False)
+        endpoints = [endpoint.Endpoint()]
+        self.server = messaging.get_rpc_server(transport, target, endpoints,
+                                               executor='eventlet')
+        LOG.info(_LI('Starting consumer...'))
+        self.server.start()
+        super(Consumer, self).start()
 
-    def terminate(self, graceful=False):
-        if self.message_listener:
-            LOG.info('Stopping consumer...')
-            self.message_listener.stop()
+    def stop(self, graceful=False):
+        if self.server:
+            LOG.info(_LI('Stopping consumer...'))
+            self.server.stop()
             if graceful:
-                LOG.info('Consumer successfully stopped.  Waiting for final '
-                         'messages to be processed...')
-                self.message_listener.wait()
-        if self.endpoints:
-            LOG.info('Shutting down endpoint worker executors...')
-            for e in self.endpoints:
-                try:
-                    e.worker.executor.shutdown()
-                except AttributeError:
-                    pass
-        super(ConsumerService, self).terminate()
+                LOG.info(
+                    _LI('Consumer successfully stopped.  Waiting for final '
+                        'messages to be processed...'))
+                self.server.wait()
+        super(Consumer, self).stop(graceful=graceful)
+
+    def reset(self):
+        if self.server:
+            self.server.reset()
+        super(Consumer, self).reset()

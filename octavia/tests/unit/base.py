@@ -16,8 +16,6 @@ import mock
 import testtools
 
 from octavia.common import clients
-# needed for tests to function when run independently:
-from octavia.common import config  # noqa: F401
 
 
 class TestCase(testtools.TestCase):

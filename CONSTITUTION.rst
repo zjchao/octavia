@@ -37,7 +37,7 @@ way around.
 Octavia is a load balancer for large operators
 ----------------------------------------------
 That's not to say that small operators can't use it. (In fact, we expect it to
-work well for small deployments, too.) But what we mean here is that if in
+work well for small deployements, too.) But what we mean here is that if in
 creating, improving or maintaining Octavia we somehow make it unable to meet
 the needs of a typical large operator (or that operator's users), then we have
 failed.
@@ -45,7 +45,7 @@ failed.
 Octavia follows the best coding and design conventions
 ------------------------------------------------------
 For the most part, Octavia tries to follow the coding standards set forth for
-the OpenStack project in general: https://docs.openstack.org/hacking/latest
+the OpenStack project in general: http://docs.openstack.org/developer/hacking/
 More specific additional standards can be found in the HACKING.rst file in the
 same directory as this constitution.
 

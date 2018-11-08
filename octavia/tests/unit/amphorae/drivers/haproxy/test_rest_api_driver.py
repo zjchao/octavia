@@ -14,131 +14,51 @@
 # under the License.
 
 import mock
-from oslo_config import cfg
-from oslo_config import fixture as oslo_fixture
 from oslo_utils import uuidutils
-import requests
 import requests_mock
 import six
 
 from octavia.amphorae.driver_exceptions import exceptions as driver_except
 from octavia.amphorae.drivers.haproxy import exceptions as exc
 from octavia.amphorae.drivers.haproxy import rest_api_driver as driver
-from octavia.common import constants
 from octavia.db import models
 from octavia.network import data_models as network_models
-from octavia.tests.unit import base
-from octavia.tests.unit.common.sample_configs import sample_certs
+from octavia.tests.unit import base as base
 from octavia.tests.unit.common.sample_configs import sample_configs
 
-FAKE_CIDR = '198.51.100.0/24'
-FAKE_GATEWAY = '192.51.100.1'
-FAKE_IP = '192.0.2.10'
-FAKE_IPV6 = '2001:db8::cafe'
-FAKE_IPV6_LLA = 'fe80::00ff:fe00:cafe'
+FAKE_CIDR = '10.0.0.0/24'
+FAKE_GATEWAY = '10.0.0.1'
+FAKE_IP = 'fake'
 FAKE_PEM_FILENAME = "file_name"
+FAKE_SUBNET_INFO = {'subnet_cidr': FAKE_CIDR,
+                    'gateway': FAKE_GATEWAY,
+                    'mac_address': '123'}
 FAKE_UUID_1 = uuidutils.generate_uuid()
 FAKE_VRRP_IP = '10.1.0.1'
-FAKE_MAC_ADDRESS = '123'
-FAKE_MTU = 1450
-FAKE_MEMBER_IP_PORT_NAME_1 = "10.0.0.10:1003"
-FAKE_MEMBER_IP_PORT_NAME_2 = "10.0.0.11:1004"
 
 
 class TestHaproxyAmphoraLoadBalancerDriverTest(base.TestCase):
 
     def setUp(self):
         super(TestHaproxyAmphoraLoadBalancerDriverTest, self).setUp()
-
-        DEST1 = '198.51.100.0/24'
-        DEST2 = '203.0.113.0/24'
-        NEXTHOP = '192.0.2.1'
-
         self.driver = driver.HaproxyAmphoraLoadBalancerDriver()
 
         self.driver.cert_manager = mock.MagicMock()
         self.driver.cert_parser = mock.MagicMock()
         self.driver.client = mock.MagicMock()
         self.driver.jinja = mock.MagicMock()
-        self.driver.udp_jinja = mock.MagicMock()
 
         # Build sample Listener and VIP configs
         self.sl = sample_configs.sample_listener_tuple(tls=True, sni=True)
-        self.sl_udp = sample_configs.sample_listener_tuple(
-            proto=constants.PROTOCOL_UDP,
-            persistence_type=constants.SESSION_PERSISTENCE_SOURCE_IP,
-            persistence_timeout=33,
-            persistence_granularity='255.255.0.0',
-            monitor_proto=constants.HEALTH_MONITOR_UDP_CONNECT)
         self.amp = self.sl.load_balancer.amphorae[0]
         self.sv = sample_configs.sample_vip_tuple()
         self.lb = self.sl.load_balancer
-        self.fixed_ip = mock.MagicMock()
-        self.fixed_ip.ip_address = '198.51.100.5'
-        self.fixed_ip.subnet.cidr = '198.51.100.0/24'
-        self.network = network_models.Network(mtu=FAKE_MTU)
-        self.port = network_models.Port(mac_address=FAKE_MAC_ADDRESS,
-                                        fixed_ips=[self.fixed_ip],
-                                        network=self.network)
-
-        self.host_routes = [network_models.HostRoute(destination=DEST1,
-                                                     nexthop=NEXTHOP),
-                            network_models.HostRoute(destination=DEST2,
-                                                     nexthop=NEXTHOP)]
-        host_routes_data = [{'destination': DEST1, 'nexthop': NEXTHOP},
-                            {'destination': DEST2, 'nexthop': NEXTHOP}]
-        self.subnet_info = {'subnet_cidr': FAKE_CIDR,
-                            'gateway': FAKE_GATEWAY,
-                            'mac_address': FAKE_MAC_ADDRESS,
-                            'vrrp_ip': self.amp.vrrp_ip,
-                            'mtu': FAKE_MTU,
-                            'host_routes': host_routes_data}
-
-        self.timeout_dict = {constants.REQ_CONN_TIMEOUT: 1,
-                             constants.REQ_READ_TIMEOUT: 2,
-                             constants.CONN_MAX_RETRIES: 3,
-                             constants.CONN_RETRY_INTERVAL: 4}
-
-    @mock.patch('octavia.common.tls_utils.cert_parser.load_certificates_data')
-    def test_update_amphora_listeners(self, mock_load_cert):
-        mock_amphora = mock.MagicMock()
-        mock_amphora.id = uuidutils.generate_uuid()
-        mock_listener = mock.MagicMock()
-        mock_listener.id = uuidutils.generate_uuid()
-        mock_load_cert.return_value = {'tls_cert': None, 'sni_certs': []}
-        self.driver.jinja.build_config.return_value = 'the_config'
-
-        self.driver.update_amphora_listeners(None, 1, [],
-                                             self.timeout_dict)
-        mock_load_cert.assert_not_called()
-        self.driver.jinja.build_config.assert_not_called()
-        self.driver.client.upload_config.assert_not_called()
-        self.driver.client.reload_listener.assert_not_called()
-
-        self.driver.update_amphora_listeners([mock_listener], 0,
-                                             [mock_amphora], self.timeout_dict)
-        self.driver.client.upload_config.assert_called_once_with(
-            mock_amphora, mock_listener.id, 'the_config',
-            timeout_dict=self.timeout_dict)
-        self.driver.client.reload_listener(mock_amphora, mock_listener.id,
-                                           timeout_dict=self.timeout_dict)
-
-        mock_load_cert.reset_mock()
-        self.driver.jinja.build_config.reset_mock()
-        self.driver.client.upload_config.reset_mock()
-        self.driver.client.reload_listener.reset_mock()
-        mock_amphora.status = constants.DELETED
-        self.driver.update_amphora_listeners([mock_listener], 0,
-                                             [mock_amphora], self.timeout_dict)
-        mock_load_cert.assert_not_called()
-        self.driver.jinja.build_config.assert_not_called()
-        self.driver.client.upload_config.assert_not_called()
-        self.driver.client.reload_listener.assert_not_called()
+        self.port = network_models.Port(mac_address='123')
 
     @mock.patch('octavia.common.tls_utils.cert_parser.load_certificates_data')
     @mock.patch('octavia.common.tls_utils.cert_parser.get_host_names')
     def test_update(self, mock_cert, mock_load_crt):
-        mock_cert.return_value = {'cn': sample_certs.X509_CERT_CN}
+        mock_cert.return_value = {'cn': 'aFakeCN'}
         sconts = []
         for sni_container in self.sl.sni_containers:
             sconts.append(sni_container.tls_container)
@@ -147,7 +67,7 @@ class TestHaproxyAmphoraLoadBalancerDriverTest(base.TestCase):
             'sni_certs': sconts
         }
         self.driver.client.get_cert_md5sum.side_effect = [
-            exc.NotFound, 'Fake_MD5', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']
+            exc.NotFound, 'Fake_MD5', 'd41d8cd98f00b204e9800998ecf8427e']
         self.driver.jinja.build_config.side_effect = ['fake_config']
         self.driver.client.get_listener_status.side_effect = [
             dict(status='ACTIVE')]
@@ -157,35 +77,19 @@ class TestHaproxyAmphoraLoadBalancerDriverTest(base.TestCase):
 
         # verify result
         # this is called 3 times
-        gcm_calls = [
-            mock.call(self.amp, self.sl.id,
-                      self.sl.default_tls_container.id + '.pem',
-                      ignore=(404,)),
-            mock.call(self.amp, self.sl.id,
-                      sconts[0].id + '.pem', ignore=(404,)),
-            mock.call(self.amp, self.sl.id,
-                      sconts[1].id + '.pem', ignore=(404,))
-        ]
-        self.driver.client.get_cert_md5sum.assert_has_calls(gcm_calls,
-                                                            any_order=True)
-
+        self.driver.client.get_cert_md5sum.assert_called_with(
+            self.amp, self.sl.id, 'aFakeCN.pem')
         # this is called three times (last MD5 matches)
-        fp1 = b'\n'.join([sample_certs.X509_CERT,
-                          sample_certs.X509_CERT_KEY,
-                          sample_certs.X509_IMDS]) + b'\n'
-        fp2 = b'\n'.join([sample_certs.X509_CERT_2,
-                          sample_certs.X509_CERT_KEY_2,
-                          sample_certs.X509_IMDS]) + b'\n'
-        fp3 = b'\n'.join([sample_certs.X509_CERT_3,
-                          sample_certs.X509_CERT_KEY_3,
-                          sample_certs.X509_IMDS]) + b'\n'
+        fp1 = ('--imainter1--\n\n--imainter1too--\n'
+               '\n--imapem1--\n\n--imakey1--\n')
+        fp2 = ('--imainter2--\n\n--imainter2too--\n'
+               '\n--imapem2--\n\n--imakey2--\n')
+        fp3 = ('--imainter3--\n\n--imainter3too--\n'
+               '\n--imapem3--\n\n--imakey3--\n')
         ucp_calls = [
-            mock.call(self.amp, self.sl.id,
-                      self.sl.default_tls_container.id + '.pem', fp1),
-            mock.call(self.amp, self.sl.id,
-                      sconts[0].id + '.pem', fp2),
-            mock.call(self.amp, self.sl.id,
-                      sconts[1].id + '.pem', fp3)
+            mock.call(self.amp, self.sl.id, 'aFakeCN.pem', fp1),
+            mock.call(self.amp, self.sl.id, 'aFakeCN.pem', fp2),
+            mock.call(self.amp, self.sl.id, 'aFakeCN.pem', fp3)
         ]
         self.driver.client.upload_cert_pem.assert_has_calls(ucp_calls,
                                                             any_order=True)
@@ -197,19 +101,17 @@ class TestHaproxyAmphoraLoadBalancerDriverTest(base.TestCase):
         self.driver.client.reload_listener.assert_called_once_with(
             self.amp, self.sl.id)
 
-    def test_udp_update(self):
-        self.driver.udp_jinja.build_config.side_effect = ['fake_udp_config']
+        # listener down
+        self.driver.client.get_cert_md5sum.side_effect = [
+            'd41d8cd98f00b204e9800998ecf8427e'] * 3
+        self.driver.jinja.build_config.side_effect = ['fake_config']
+        self.driver.client.get_listener_status.side_effect = [
+            dict(status='BLAH')]
 
-        # Execute driver method
-        self.driver.update(self.sl_udp, self.sv)
+        self.driver.update(self.sl, self.sv)
 
-        # upload only one config file
-        self.driver.client.upload_udp_config.assert_called_once_with(
-            self.amp, self.sl_udp.id, 'fake_udp_config')
-
-        # start should be called once
-        self.driver.client.reload_listener.assert_called_once_with(
-            self.amp, self.sl_udp.id)
+        self.driver.client.start_listener.assert_called_once_with(
+            self.amp, self.sl.id)
 
     def test_upload_cert_amp(self):
         self.driver.upload_cert_amp(self.amp, six.b('test'))
@@ -217,163 +119,50 @@ class TestHaproxyAmphoraLoadBalancerDriverTest(base.TestCase):
             self.amp, six.b('test'))
 
     def test_stop(self):
-        self.driver.client.stop_listener.__name__ = 'stop_listener'
         # Execute driver method
         self.driver.stop(self.sl, self.sv)
         self.driver.client.stop_listener.assert_called_once_with(
             self.amp, self.sl.id)
 
-    def test_udp_stop(self):
-        self.driver.client.stop_listener.__name__ = 'stop_listener'
-        # Execute driver method - UDP case
-        self.driver.stop(self.sl_udp, self.sv)
-        self.driver.client.stop_listener.assert_called_once_with(
-            self.amp, self.sl_udp.id)
-
     def test_start(self):
-        amp1 = mock.MagicMock()
-        amp2 = mock.MagicMock()
-        amp2.status = constants.DELETED
-        listener = mock.MagicMock()
-        listener.id = uuidutils.generate_uuid()
-        listener.load_balancer.amphorae = [amp1, amp2]
-        listener.protocol = 'listener_protocol'
-        self.driver.client.start_listener.__name__ = 'start_listener'
         # Execute driver method
-        self.driver.start(listener, self.sv)
-        self.driver.client.start_listener.assert_called_once_with(
-            amp1, listener.id)
-
-    def test_start_with_amphora(self):
-        # Execute driver method
-        amp = mock.MagicMock()
-        self.driver.client.start_listener.__name__ = 'start_listener'
-        self.driver.start(self.sl, self.sv, self.amp)
+        self.driver.start(self.sl, self.sv)
         self.driver.client.start_listener.assert_called_once_with(
             self.amp, self.sl.id)
 
-        self.driver.client.start_listener.reset_mock()
-        amp.status = constants.DELETED
-        self.driver.start(self.sl, self.sv, amp)
-        self.driver.client.start_listener.assert_not_called()
-
-    def test_udp_start(self):
-        self.driver.client.start_listener.__name__ = 'start_listener'
-        # Execute driver method
-        self.driver.start(self.sl_udp, self.sv)
-        self.driver.client.start_listener.assert_called_once_with(
-            self.amp, self.sl_udp.id)
-
     def test_delete(self):
-        self.driver.client.delete_listener.__name__ = 'delete_listener'
         # Execute driver method
         self.driver.delete(self.sl, self.sv)
         self.driver.client.delete_listener.assert_called_once_with(
             self.amp, self.sl.id)
 
-    def test_udp_delete(self):
-        self.driver.client.delete_listener.__name__ = 'delete_listener'
-        # Execute driver method
-        self.driver.delete(self.sl_udp, self.sv)
-        self.driver.client.delete_listener.assert_called_once_with(
-            self.amp, self.sl_udp.id)
-
     def test_get_info(self):
-        self.driver.client.get_info.return_value = 'FAKE_INFO'
-        result = self.driver.get_info(self.amp)
-        self.assertEqual('FAKE_INFO', result)
+        pass
 
     def test_get_diagnostics(self):
-        # TODO(johnsom) Implement once this exists on the amphora agent.
-        result = self.driver.get_diagnostics(self.amp)
-        self.assertIsNone(result)
+        pass
 
     def test_finalize_amphora(self):
-        # TODO(johnsom) Implement once this exists on the amphora agent.
-        result = self.driver.finalize_amphora(self.amp)
-        self.assertIsNone(result)
+        pass
 
     def test_post_vip_plug(self):
         amphorae_network_config = mock.MagicMock()
         amphorae_network_config.get().vip_subnet.cidr = FAKE_CIDR
         amphorae_network_config.get().vip_subnet.gateway_ip = FAKE_GATEWAY
-        amphorae_network_config.get().vip_subnet.host_routes = self.host_routes
         amphorae_network_config.get().vrrp_port = self.port
-        self.driver.post_vip_plug(self.amp, self.lb, amphorae_network_config)
+        self.driver.post_vip_plug(self.lb, amphorae_network_config)
         self.driver.client.plug_vip.assert_called_once_with(
-            self.amp, self.lb.vip.ip_address, self.subnet_info)
+            self.amp, self.lb.vip.ip_address, FAKE_SUBNET_INFO)
 
     def test_post_network_plug(self):
-        # Test dhcp path
-        port = network_models.Port(mac_address=FAKE_MAC_ADDRESS,
-                                   fixed_ips=[],
-                                   network=self.network)
-        self.driver.post_network_plug(self.amp, port)
-        self.driver.client.plug_network.assert_called_once_with(
-            self.amp, dict(mac_address=FAKE_MAC_ADDRESS,
-                           fixed_ips=[],
-                           mtu=FAKE_MTU))
-
-        self.driver.client.plug_network.reset_mock()
-
-        # Test fixed IP path
         self.driver.post_network_plug(self.amp, self.port)
         self.driver.client.plug_network.assert_called_once_with(
-            self.amp, dict(mac_address=FAKE_MAC_ADDRESS,
-                           fixed_ips=[dict(ip_address='198.51.100.5',
-                                           subnet_cidr='198.51.100.0/24',
-                                           host_routes=[])],
-                           mtu=FAKE_MTU))
-
-    def test_post_network_plug_with_host_routes(self):
-        SUBNET_ID = 'SUBNET_ID'
-        FIXED_IP1 = '192.0.2.2'
-        FIXED_IP2 = '192.0.2.3'
-        SUBNET_CIDR = '192.0.2.0/24'
-        DEST1 = '198.51.100.0/24'
-        DEST2 = '203.0.113.0/24'
-        NEXTHOP = '192.0.2.1'
-        host_routes = [network_models.HostRoute(destination=DEST1,
-                                                nexthop=NEXTHOP),
-                       network_models.HostRoute(destination=DEST2,
-                                                nexthop=NEXTHOP)]
-        subnet = network_models.Subnet(id=SUBNET_ID, cidr=SUBNET_CIDR,
-                                       ip_version=4, host_routes=host_routes)
-        fixed_ips = [
-            network_models.FixedIP(subnet_id=subnet.id, ip_address=FIXED_IP1,
-                                   subnet=subnet),
-            network_models.FixedIP(subnet_id=subnet.id, ip_address=FIXED_IP2,
-                                   subnet=subnet)
-        ]
-        port = network_models.Port(mac_address=FAKE_MAC_ADDRESS,
-                                   fixed_ips=fixed_ips,
-                                   network=self.network)
-        self.driver.post_network_plug(self.amp, port)
-        expected_fixed_ips = [
-            {'ip_address': FIXED_IP1, 'subnet_cidr': SUBNET_CIDR,
-             'host_routes': [{'destination': DEST1, 'nexthop': NEXTHOP},
-                             {'destination': DEST2, 'nexthop': NEXTHOP}]},
-            {'ip_address': FIXED_IP2, 'subnet_cidr': SUBNET_CIDR,
-             'host_routes': [{'destination': DEST1, 'nexthop': NEXTHOP},
-                             {'destination': DEST2, 'nexthop': NEXTHOP}]}
-        ]
-        self.driver.client.plug_network.assert_called_once_with(
-            self.amp, dict(mac_address=FAKE_MAC_ADDRESS,
-                           fixed_ips=expected_fixed_ips,
-                           mtu=FAKE_MTU))
+            self.amp, dict(mac_address='123'))
 
     def test_get_vrrp_interface(self):
         self.driver.get_vrrp_interface(self.amp)
         self.driver.client.get_interface.assert_called_once_with(
-            self.amp, self.amp.vrrp_ip, timeout_dict=None)
-
-    def test_get_haproxy_versions(self):
-        ref_versions = ['1', '6']
-        self.driver.client.get_info.return_value = {
-            'haproxy_version': u'1.6.3-1ubuntu0.1'}
-        result = self.driver._get_haproxy_versions(self.amp)
-        self.driver.client.get_info.assert_called_once_with(self.amp)
-        self.assertEqual(ref_versions, result)
+            self.amp, self.amp.vrrp_ip)
 
 
 class TestAmphoraAPIClientTest(base.TestCase):
@@ -383,36 +172,12 @@ class TestAmphoraAPIClientTest(base.TestCase):
         self.driver = driver.AmphoraAPIClient()
         self.base_url = "https://127.0.0.1:9443/0.5"
         self.amp = models.Amphora(lb_network_ip='127.0.0.1', compute_id='123')
-        self.port_info = dict(mac_address=FAKE_MAC_ADDRESS)
-        # Override with much lower values for testing purposes..
-        conf = oslo_fixture.Config(cfg.CONF)
-        conf.config(group="haproxy_amphora", connection_max_retries=2)
+        self.port_info = dict(mac_address='123')
 
-        self.subnet_info = {'subnet_cidr': FAKE_CIDR,
-                            'gateway': FAKE_GATEWAY,
-                            'mac_address': FAKE_MAC_ADDRESS,
-                            'vrrp_ip': self.amp.vrrp_ip}
-        patcher = mock.patch('time.sleep').start()
-        self.addCleanup(patcher.stop)
-        self.timeout_dict = {constants.REQ_CONN_TIMEOUT: 1,
-                             constants.REQ_READ_TIMEOUT: 2,
-                             constants.CONN_MAX_RETRIES: 3,
-                             constants.CONN_RETRY_INTERVAL: 4}
-
-    def test_base_url(self):
-        url = self.driver._base_url(FAKE_IP)
-        self.assertEqual('https://192.0.2.10:9443/0.5/', url)
-        url = self.driver._base_url(FAKE_IPV6)
-        self.assertEqual('https://[2001:db8::cafe]:9443/0.5/', url)
-        url = self.driver._base_url(FAKE_IPV6_LLA)
-        self.assertEqual('https://[fe80::00ff:fe00:cafe%o-hm0]:9443/0.5/', url)
-
-    @mock.patch('requests.Session.get', side_effect=requests.ConnectionError)
-    @mock.patch('octavia.amphorae.drivers.haproxy.rest_api_driver.time.sleep')
-    def test_request(self, mock_sleep, mock_get):
+    def test_request(self):
         self.assertRaises(driver_except.TimeOutException,
-                          self.driver.request, 'get', self.amp,
-                          'unavailableURL', self.timeout_dict)
+                          self.driver.request,
+                          'get', self.amp, 'unavailableURL')
 
     @requests_mock.mock()
     def test_get_info(self, m):
@@ -432,8 +197,7 @@ class TestAmphoraAPIClientTest(base.TestCase):
     @requests_mock.mock()
     def test_get_info_missing(self, m):
         m.get("{base}/info".format(base=self.base_url),
-              status_code=404,
-              headers={'content-type': 'application/json'})
+              status_code=404)
         self.assertRaises(exc.NotFound, self.driver.get_info, self.amp)
 
     @requests_mock.mock()
@@ -470,8 +234,7 @@ class TestAmphoraAPIClientTest(base.TestCase):
     @requests_mock.mock()
     def test_get_details_missing(self, m):
         m.get("{base}/details".format(base=self.base_url),
-              status_code=404,
-              headers={'content-type': 'application/json'})
+              status_code=404)
         self.assertRaises(exc.NotFound, self.driver.get_details, self.amp)
 
     @requests_mock.mock()
@@ -507,8 +270,7 @@ class TestAmphoraAPIClientTest(base.TestCase):
     @requests_mock.mock()
     def test_get_all_listeners_missing(self, m):
         m.get("{base}/listeners".format(base=self.base_url),
-              status_code=404,
-              headers={'content-type': 'application/json'})
+              status_code=404)
         self.assertRaises(exc.NotFound, self.driver.get_all_listeners,
                           self.amp)
 
@@ -537,26 +299,6 @@ class TestAmphoraAPIClientTest(base.TestCase):
         self.assertEqual(listener, status)
 
     @requests_mock.mock()
-    def test_get_udp_listener_status(self, m):
-        udp_listener = {"status": "ACTIVE", "type": "lvs",
-                        "uuid": FAKE_UUID_1,
-                        "pools": [{
-                            "UDP-Listener-%s-pool" % FAKE_UUID_1:
-                                {
-                                    "status": "UP",
-                                    "members": [
-                                        {FAKE_MEMBER_IP_PORT_NAME_1: "DOWN"},
-                                        {FAKE_MEMBER_IP_PORT_NAME_2: "ACTIVE"},
-                                    ]
-                                }
-                        }]}
-        m.get("{base}/listeners/{listener_id}".format(
-            base=self.base_url, listener_id=FAKE_UUID_1),
-            json=udp_listener)
-        status = self.driver.get_listener_status(self.amp, FAKE_UUID_1)
-        self.assertEqual(udp_listener, status)
-
-    @requests_mock.mock()
     def test_get_listener_status_unauthorized(self, m):
         m.get("{base}/listeners/{listener_id}".format(
             base=self.base_url, listener_id=FAKE_UUID_1),
@@ -569,8 +311,7 @@ class TestAmphoraAPIClientTest(base.TestCase):
     def test_get_listener_status_missing(self, m):
         m.get("{base}/listeners/{listener_id}".format(
             base=self.base_url, listener_id=FAKE_UUID_1),
-            status_code=404,
-            headers={'content-type': 'application/json'})
+            status_code=404)
         self.assertRaises(exc.NotFound,
                           self.driver.get_listener_status, self.amp,
                           FAKE_UUID_1)
@@ -604,8 +345,7 @@ class TestAmphoraAPIClientTest(base.TestCase):
     def test_start_listener_missing(self, m):
         m.put("{base}/listeners/{listener_id}/start".format(
             base=self.base_url, listener_id=FAKE_UUID_1),
-            status_code=404,
-            headers={'content-type': 'application/json'})
+            status_code=404)
         self.assertRaises(exc.NotFound, self.driver.start_listener,
                           self.amp, FAKE_UUID_1)
 
@@ -644,8 +384,7 @@ class TestAmphoraAPIClientTest(base.TestCase):
     def test_stop_listener_missing(self, m):
         m.put("{base}/listeners/{listener_id}/stop".format(
             base=self.base_url, listener_id=FAKE_UUID_1),
-            status_code=404,
-            headers={'content-type': 'application/json'})
+            status_code=404)
         self.assertRaises(exc.NotFound, self.driver.stop_listener,
                           self.amp, FAKE_UUID_1)
 
@@ -684,10 +423,9 @@ class TestAmphoraAPIClientTest(base.TestCase):
     def test_delete_listener_missing(self, m):
         m.delete("{base}/listeners/{listener_id}".format(
             base=self.base_url, listener_id=FAKE_UUID_1),
-            status_code=404,
-            headers={'content-type': 'application/json'})
-        self.driver.delete_listener(self.amp, FAKE_UUID_1)
-        self.assertTrue(m.called)
+            status_code=404)
+        self.assertRaises(exc.NotFound, self.driver.delete_listener,
+                          self.amp, FAKE_UUID_1)
 
     @requests_mock.mock()
     def test_delete_listener_unauthorized(self, m):
@@ -808,8 +546,7 @@ class TestAmphoraAPIClientTest(base.TestCase):
     def test_get_cert_5sum_missing(self, m):
         m.get("{base}/listeners/{listener_id}/certificates/{filename}".format(
             base=self.base_url, listener_id=FAKE_UUID_1,
-            filename=FAKE_PEM_FILENAME), status_code=404,
-            headers={'content-type': 'application/json'})
+            filename=FAKE_PEM_FILENAME), status_code=404)
         self.assertRaises(exc.NotFound, self.driver.get_cert_md5sum,
                           self.amp, FAKE_UUID_1, FAKE_PEM_FILENAME)
 
@@ -852,11 +589,9 @@ class TestAmphoraAPIClientTest(base.TestCase):
         m.delete(
             "{base}/listeners/{listener_id}/certificates/{filename}".format(
                 base=self.base_url, listener_id=FAKE_UUID_1,
-                filename=FAKE_PEM_FILENAME), status_code=404,
-            headers={'content-type': 'application/json'})
-        self.driver.delete_cert_pem(self.amp, FAKE_UUID_1,
-                                    FAKE_PEM_FILENAME)
-        self.assertTrue(m.called)
+                filename=FAKE_PEM_FILENAME), status_code=404)
+        self.assertRaises(exc.NotFound, self.driver.delete_cert_pem, self.amp,
+                          FAKE_UUID_1, FAKE_PEM_FILENAME)
 
     @requests_mock.mock()
     def test_delete_cert_pem_unauthorized(self, m):
@@ -947,84 +682,11 @@ class TestAmphoraAPIClientTest(base.TestCase):
                           self.amp, FAKE_UUID_1, config)
 
     @requests_mock.mock()
-    def test_upload_udp_config(self, m):
-        config = {"name": "fake_config"}
-        m.put(
-            "{base}/listeners/"
-            "{amphora_id}/{listener_id}/udp_listener".format(
-                amphora_id=self.amp.id, base=self.base_url,
-                listener_id=FAKE_UUID_1),
-            json=config)
-        self.driver.upload_udp_config(self.amp, FAKE_UUID_1, config)
-        self.assertTrue(m.called)
-
-    @requests_mock.mock()
-    def test_upload_udp_invalid_config(self, m):
-        config = '{"name": "bad_config"}'
-        m.put(
-            "{base}/listeners/"
-            "{amphora_id}/{listener_id}/udp_listener".format(
-                amphora_id=self.amp.id, base=self.base_url,
-                listener_id=FAKE_UUID_1),
-            status_code=400)
-        self.assertRaises(exc.InvalidRequest, self.driver.upload_udp_config,
-                          self.amp, FAKE_UUID_1, config)
-
-    @requests_mock.mock()
-    def test_upload_udp_config_unauthorized(self, m):
-        config = '{"name": "bad_config"}'
-        m.put(
-            "{base}/listeners/"
-            "{amphora_id}/{listener_id}/udp_listener".format(
-                amphora_id=self.amp.id, base=self.base_url,
-                listener_id=FAKE_UUID_1),
-            status_code=401)
-        self.assertRaises(exc.Unauthorized, self.driver.upload_udp_config,
-                          self.amp, FAKE_UUID_1, config)
-
-    @requests_mock.mock()
-    def test_upload_udp_config_server_error(self, m):
-        config = '{"name": "bad_config"}'
-        m.put(
-            "{base}/listeners/"
-            "{amphora_id}/{listener_id}/udp_listener".format(
-                amphora_id=self.amp.id, base=self.base_url,
-                listener_id=FAKE_UUID_1),
-            status_code=500)
-        self.assertRaises(exc.InternalServerError,
-                          self.driver.upload_udp_config,
-                          self.amp, FAKE_UUID_1, config)
-
-    @requests_mock.mock()
-    def test_upload_udp_config_service_unavailable(self, m):
-        config = '{"name": "bad_config"}'
-        m.put(
-            "{base}/listeners/"
-            "{amphora_id}/{listener_id}/udp_listener".format(
-                amphora_id=self.amp.id, base=self.base_url,
-                listener_id=FAKE_UUID_1),
-            status_code=503)
-        self.assertRaises(exc.ServiceUnavailable,
-                          self.driver.upload_udp_config,
-                          self.amp, FAKE_UUID_1, config)
-
-    @requests_mock.mock()
     def test_plug_vip(self, m):
         m.post("{base}/plug/vip/{vip}".format(
             base=self.base_url, vip=FAKE_IP)
         )
-        self.driver.plug_vip(self.amp, FAKE_IP, self.subnet_info)
-        self.assertTrue(m.called)
-
-    @requests_mock.mock()
-    def test_plug_vip_api_not_ready(self, m):
-        m.post("{base}/plug/vip/{vip}".format(
-            base=self.base_url, vip=FAKE_IP),
-            status_code=404, headers={'content-type': 'text/html'}
-        )
-        self.assertRaises(driver_except.TimeOutException,
-                          self.driver.plug_vip,
-                          self.amp, FAKE_IP, self.subnet_info)
+        self.driver.plug_vip(self.amp, FAKE_IP, FAKE_SUBNET_INFO)
         self.assertTrue(m.called)
 
     @requests_mock.mock()
@@ -1054,7 +716,7 @@ class TestAmphoraAPIClientTest(base.TestCase):
     @requests_mock.mock()
     def test_get_interface(self, m):
         interface = [{"interface": "eth1"}]
-        ip_addr = '192.51.100.1'
+        ip_addr = '10.0.0.1'
         m.get("{base}/interface/{ip_addr}".format(base=self.base_url,
                                                   ip_addr=ip_addr),
               json=interface)

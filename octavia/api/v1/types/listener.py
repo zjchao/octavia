@@ -14,7 +14,7 @@
 
 from wsme import types as wtypes
 
-from octavia.api.common import types as base
+from octavia.api.v1.types import base
 from octavia.api.v1.types import l7policy
 from octavia.api.v1.types import pool
 from octavia.common import constants
@@ -44,9 +44,6 @@ class ListenerResponse(base.BaseType):
     default_pool_id = wtypes.wsattr(wtypes.UuidType())
     default_pool = wtypes.wsattr(pool.PoolResponse)
     l7policies = wtypes.wsattr([l7policy.L7PolicyResponse])
-    insert_headers = wtypes.wsattr(wtypes.DictType(str, str))
-    created_at = wtypes.wsattr(wtypes.datetime.datetime)
-    updated_at = wtypes.wsattr(wtypes.datetime.datetime)
 
     @classmethod
     def from_data_model(cls, data_model, children=False):
@@ -89,12 +86,10 @@ class ListenerPOST(base.BaseType):
     tls_certificate_id = wtypes.wsattr(wtypes.StringType(max_length=255))
     tls_termination = wtypes.wsattr(TLSTermination)
     sni_containers = [wtypes.StringType(max_length=255)]
-    # TODO(johnsom) Remove after deprecation (R series)
     project_id = wtypes.wsattr(wtypes.StringType(max_length=36))
     default_pool_id = wtypes.wsattr(wtypes.UuidType())
     default_pool = wtypes.wsattr(pool.PoolPOST)
     l7policies = wtypes.wsattr([l7policy.L7PolicyPOST], default=[])
-    insert_headers = wtypes.wsattr(wtypes.DictType(str, str))
 
 
 class ListenerPUT(base.BaseType):
@@ -109,4 +104,3 @@ class ListenerPUT(base.BaseType):
     tls_termination = wtypes.wsattr(TLSTermination)
     sni_containers = [wtypes.StringType(max_length=255)]
     default_pool_id = wtypes.wsattr(wtypes.UuidType())
-    insert_headers = wtypes.wsattr(wtypes.DictType(str, str))

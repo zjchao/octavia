@@ -15,37 +15,23 @@
 from octavia.common import constants
 from octavia.tests.functional.api.v1 import base
 
-from oslo_utils import uuidutils
-
 
 class TestListenerStatistics(base.BaseAPITest):
-    FAKE_UUID_1 = uuidutils.generate_uuid()
 
     def setUp(self):
         super(TestListenerStatistics, self).setUp()
-        self.lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()})
+        self.lb = self.create_load_balancer({})
         self.set_lb_status(self.lb.get('id'))
         self.listener = self.create_listener(self.lb.get('id'),
                                              constants.PROTOCOL_HTTP, 80)
         self.set_lb_status(self.lb.get('id'))
         self.ls_path = self.LISTENER_STATS_PATH.format(
             lb_id=self.lb.get('id'), listener_id=self.listener.get('id'))
-        self.amphora = self.create_amphora(uuidutils.generate_uuid(),
-                                           self.lb.get('id'))
 
     def test_get(self):
-        ls = self.create_listener_stats(listener_id=self.listener.get('id'),
-                                        amphora_id=self.amphora.id)
-        expected = {
-            'listener': {
-                'bytes_in': ls['bytes_in'],
-                'bytes_out': ls['bytes_out'],
-                'active_connections': ls['active_connections'],
-                'total_connections': ls['total_connections'],
-                'request_errors': ls['request_errors']
-            }
-        }
+        ls = self.create_listener_stats(listener_id=self.listener.get('id'))
+        ls.pop('listener')
+        ls.pop('listener_id')
         response = self.get(self.ls_path)
         response_body = response.json
-        self.assertEqual(expected, response_body)
+        self.assertEqual(ls, response_body)

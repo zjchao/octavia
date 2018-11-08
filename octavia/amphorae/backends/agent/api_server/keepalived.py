@@ -12,14 +12,13 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import logging
 import os
 import stat
 import subprocess
 
 import flask
 import jinja2
-from oslo_log import log as logging
-import webob
 
 from octavia.amphorae.backends.agent.api_server import listener
 from octavia.amphorae.backends.agent.api_server import util
@@ -30,131 +29,78 @@ BUFFER = 100
 
 LOG = logging.getLogger(__name__)
 
-j2_env = jinja2.Environment(autoescape=True, loader=jinja2.FileSystemLoader(
+j2_env = jinja2.Environment(loader=jinja2.FileSystemLoader(
     os.path.dirname(os.path.realpath(__file__)) + consts.AGENT_API_TEMPLATES))
-UPSTART_TEMPLATE = j2_env.get_template(consts.KEEPALIVED_JINJA2_UPSTART)
-SYSVINIT_TEMPLATE = j2_env.get_template(consts.KEEPALIVED_JINJA2_SYSVINIT)
-SYSTEMD_TEMPLATE = j2_env.get_template(consts.KEEPALIVED_JINJA2_SYSTEMD)
+template = j2_env.get_template(consts.KEEPALIVED_CONF)
 check_script_template = j2_env.get_template(consts.CHECK_SCRIPT_CONF)
 
 
-class Keepalived(object):
+def upload_keepalived_config():
+    stream = listener.Wrapped(flask.request.stream)
 
-    def upload_keepalived_config(self):
-        stream = listener.Wrapped(flask.request.stream)
+    if not os.path.exists(util.keepalived_dir()):
+        os.makedirs(util.keepalived_dir())
+        os.makedirs(util.keepalived_check_scripts_dir())
 
-        if not os.path.exists(util.keepalived_dir()):
-            os.makedirs(util.keepalived_dir())
-            os.makedirs(util.keepalived_check_scripts_dir())
-
-        conf_file = util.keepalived_cfg_path()
-        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-        # mode 00644
-        mode = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
-        with os.fdopen(os.open(conf_file, flags, mode), 'wb') as f:
+    conf_file = util.keepalived_cfg_path()
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    # mode 00644
+    mode = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
+    with os.fdopen(os.open(conf_file, flags, mode), 'w') as f:
+        b = stream.read(BUFFER)
+        while b:
+            f.write(b)
             b = stream.read(BUFFER)
-            while b:
-                f.write(b)
-                b = stream.read(BUFFER)
 
-        init_system = util.get_os_init_system()
+    file_path = util.keepalived_init_path()
+    # mode 00755
+    mode = (stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP |
+            stat.S_IROTH | stat.S_IXOTH)
+    if not os.path.exists(file_path):
+        with os.fdopen(os.open(file_path, flags, mode), 'w') as text_file:
+            text = template.render(
+                keepalived_pid=util.keepalived_pid_path(),
+                keepalived_cmd=consts.KEEPALIVED_CMD,
+                keepalived_cfg=util.keepalived_cfg_path(),
+                keepalived_log=util.keepalived_log_path(),
+                amphora_nsname=consts.AMPHORA_NAMESPACE
+            )
+            text_file.write(text)
 
-        file_path = util.keepalived_init_path(init_system)
+        # Renders the Keepalived check script
+        keepalived_path = util.keepalived_check_script_path()
+        open_obj = os.open(keepalived_path, flags, mode)
+        with os.fdopen(open_obj, 'w') as text_file:
+            text = check_script_template.render(
+                check_scripts_dir=util.keepalived_check_scripts_dir()
+            )
+            text_file.write(text)
 
-        if init_system == consts.INIT_SYSTEMD:
-            template = SYSTEMD_TEMPLATE
-            init_enable_cmd = "systemctl enable octavia-keepalived"
-        elif init_system == consts.INIT_UPSTART:
-            template = UPSTART_TEMPLATE
-        elif init_system == consts.INIT_SYSVINIT:
-            template = SYSVINIT_TEMPLATE
-            init_enable_cmd = "insserv {file}".format(file=file_path)
-        else:
-            raise util.UnknownInitError()
+    res = flask.make_response(flask.jsonify({
+        'message': 'OK'}), 200)
+    res.headers['ETag'] = stream.get_md5()
 
-        if init_system == consts.INIT_SYSTEMD:
-            # mode 00644
-            mode = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
-        else:
-            # mode 00755
-            mode = (stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP |
-                    stat.S_IROTH | stat.S_IXOTH)
-        if not os.path.exists(file_path):
-            with os.fdopen(os.open(file_path, flags, mode), 'w') as text_file:
-                text = template.render(
-                    keepalived_pid=util.keepalived_pid_path(),
-                    keepalived_cmd=consts.KEEPALIVED_CMD,
-                    keepalived_cfg=util.keepalived_cfg_path(),
-                    keepalived_log=util.keepalived_log_path(),
-                    amphora_nsname=consts.AMPHORA_NAMESPACE
-                )
-                text_file.write(text)
+    return res
 
-            # Renders the Keepalived check script
-            keepalived_path = util.keepalived_check_script_path()
-            # mode 00755
-            mode = (stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP |
-                    stat.S_IROTH | stat.S_IXOTH)
-            open_obj = os.open(keepalived_path, flags, mode)
-            with os.fdopen(open_obj, 'w') as text_file:
-                text = check_script_template.render(
-                    check_scripts_dir=util.keepalived_check_scripts_dir()
-                )
-                text_file.write(text)
 
-        # Make sure the new service is enabled on boot
-        if init_system != consts.INIT_UPSTART:
-            try:
-                subprocess.check_output(init_enable_cmd.split(),
-                                        stderr=subprocess.STDOUT)
-            except subprocess.CalledProcessError as e:
-                LOG.debug('Failed to enable octavia-keepalived service: '
-                          '%(err)s %(output)s', {'err': e, 'output': e.output})
-                return webob.Response(json=dict(
-                    message="Error enabling octavia-keepalived service",
-                    details=e.output), status=500)
+def manager_keepalived_service(action):
+    action = action.lower()
+    if action not in ['start', 'stop', 'reload']:
+        return flask.make_response(flask.jsonify(dict(
+            message='Invalid Request',
+            details="Unknown action: {0}".format(action))), 400)
 
-        res = webob.Response(json={'message': 'OK'}, status=200)
-        res.headers['ETag'] = stream.get_md5()
+    cmd = ("/usr/sbin/service octavia-keepalived {action}".format(
+        action=action))
 
-        return res
+    try:
+        subprocess.check_output(cmd.split(), stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as e:
+        LOG.debug("Failed to {0} keepalived service: {1}".format(action, e))
+        return flask.make_response(flask.jsonify(dict(
+            message="Failed to {0} keepalived service".format(action),
+            details=e.output)), 500)
 
-    def manager_keepalived_service(self, action):
-        action = action.lower()
-        if action not in [consts.AMP_ACTION_START,
-                          consts.AMP_ACTION_STOP,
-                          consts.AMP_ACTION_RELOAD]:
-            return webob.Response(json=dict(
-                message='Invalid Request',
-                details="Unknown action: {0}".format(action)), status=400)
-
-        if action == consts.AMP_ACTION_START:
-            keepalived_pid_path = util.keepalived_pid_path()
-            try:
-                # Is there a pid file for keepalived?
-                with open(keepalived_pid_path, 'r') as pid_file:
-                    pid = int(pid_file.readline())
-                os.kill(pid, 0)
-
-                # If we got here, it means the keepalived process is running.
-                # We should reload it instead of trying to start it again.
-                action = consts.AMP_ACTION_RELOAD
-            except (IOError, OSError):
-                pass
-
-        cmd = ("/usr/sbin/service octavia-keepalived {action}".format(
-            action=action))
-
-        try:
-            subprocess.check_output(cmd.split(), stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError as e:
-            LOG.debug('Failed to %s octavia-keepalived service: %s %s',
-                      action, e, e.output)
-            return webob.Response(json=dict(
-                message="Failed to {0} octavia-keepalived service".format(
-                    action), details=e.output), status=500)
-
-        return webob.Response(
-            json=dict(message='OK',
-                      details='keepalived {action}ed'.format(action=action)),
-            status=202)
+    return flask.make_response(flask.jsonify(
+        dict(message='OK',
+             details='keepalived {action}ed'.format(action=action))), 202)

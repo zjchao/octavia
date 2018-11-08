@@ -42,12 +42,12 @@ class EventStreamerBase(object):
 class EventStreamerNoop(EventStreamerBase):
     """Nop class implementation of EventStreamer
 
-    Useful if you're running in standalone mode and don't need to send
-    updates to Neutron LBaaS
+    Usefull if your running in standalone mode and don't need to send
+    updates to Neutron Lbaas
     """
 
     def emit(self, cnt):
-        pass
+            pass
 
 
 class EventStreamerNeutron(EventStreamerBase):
@@ -60,12 +60,7 @@ class EventStreamerNeutron(EventStreamerBase):
 
     def __init__(self):
         topic = cfg.CONF.oslo_messaging.event_stream_topic
-        if cfg.CONF.oslo_messaging.event_stream_transport_url:
-            # Use custom URL
-            self.transport = oslo_messaging.get_rpc_transport(
-                cfg.CONF, cfg.CONF.oslo_messaging.event_stream_transport_url)
-        else:
-            self.transport = oslo_messaging.get_rpc_transport(cfg.CONF)
+        self.transport = oslo_messaging.get_transport(cfg.CONF)
         self.target = oslo_messaging.Target(topic=topic, exchange="common",
                                             namespace='control', fanout=False,
                                             version='1.0')
