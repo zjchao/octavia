@@ -45,15 +45,13 @@ fi
 function generate_testr_results {
     # Give job user rights to access tox logs
     sudo -H -u "$owner" chmod o+rw .
-    if [ -d ".stestr" ] ; then
-        sudo -H -u "$owner" chmod o+rw -R .stestr
-        if [ -f ".stestr/0" ] ; then
-            stestr last --subunit > ./testrepository.subunit
-            $SCRIPTS_DIR/subunit2html ./testrepository.subunit testr_results.html
-            gzip -9 ./testrepository.subunit
-            gzip -9 ./testr_results.html
-            sudo mv ./*.gz /opt/stack/logs/
-        fi
+    sudo -H -u "$owner" chmod o+rw -R .testrepository
+    if [ -f ".testrepository/0" ] ; then
+        .tox/"$testenv"/bin/subunit-1to2 < .testrepository/0 > ./testrepository.subunit
+        $SCRIPTS_DIR/subunit2html ./testrepository.subunit testr_results.html
+        gzip -9 ./testrepository.subunit
+        gzip -9 ./testr_results.html
+        sudo mv ./*.gz /opt/stack/logs/
     fi
 }
 

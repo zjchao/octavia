@@ -20,15 +20,9 @@ from alembic import config as alembic_cfg
 from alembic import util as alembic_u
 from oslo_config import cfg
 from oslo_db import options
-from oslo_log import log
-
-from octavia.i18n import _
 
 CONF = cfg.CONF
 options.set_defaults(CONF)
-log.set_defaults()
-log.register_options(CONF)
-log.setup(CONF, 'octavia-db-manage')
 
 
 def do_alembic_command(config, cmd, *args, **kwargs):
@@ -48,7 +42,7 @@ def add_alembic_subparser(sub, cmd):
 
 def do_upgrade(config, cmd):
     if not CONF.command.revision and not CONF.command.delta:
-        raise SystemExit(_('You must provide a revision or relative delta'))
+        raise SystemExit('You must provide a revision or relative delta')
 
     revision = CONF.command.revision or ''
     if '-' in revision:

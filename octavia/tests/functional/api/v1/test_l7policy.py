@@ -22,8 +22,7 @@ class TestL7Policy(base.BaseAPITest):
 
     def setUp(self):
         super(TestL7Policy, self).setUp()
-        self.lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()})
+        self.lb = self.create_load_balancer({})
         self.set_lb_status(self.lb.get('id'))
         self.listener = self.create_listener(self.lb.get('id'),
                                              constants.PROTOCOL_HTTP, 80)
@@ -174,7 +173,7 @@ class TestL7Policy(base.BaseAPITest):
                                            listener_id=self.listener.get('id'))
         body = {'id': l7policy.get('id'),
                 'action': constants.L7POLICY_ACTION_REJECT}
-        self.post(path, body, status=409)
+        self.post(path, body, status=409, expect_errors=True)
 
     def test_bad_create(self):
         l7policy = {'name': 'test1'}
@@ -236,7 +235,7 @@ class TestL7Policy(base.BaseAPITest):
             constants.L7POLICY_ACTION_REJECT)
         new_l7policy = {'action': 'bad action'}
         self.put(self.l7policy_path.format(l7policy_id=api_l7policy.get('id')),
-                 new_l7policy, status=400)
+                 new_l7policy, expect_errors=True)
 
     def test_bad_update_redirect_to_pool(self):
         api_l7policy = self.create_l7policy(
@@ -245,7 +244,7 @@ class TestL7Policy(base.BaseAPITest):
         new_l7policy = {'action': constants.L7POLICY_ACTION_REDIRECT_TO_POOL,
                         'redirect_pool_id': uuidutils.generate_uuid()}
         self.put(self.l7policy_path.format(l7policy_id=api_l7policy.get('id')),
-                 new_l7policy, status=404)
+                 new_l7policy, expect_errors=True)
 
     def test_bad_update_redirect_to_url(self):
         api_l7policy = self.create_l7policy(
@@ -254,7 +253,7 @@ class TestL7Policy(base.BaseAPITest):
         new_l7policy = {'action': constants.L7POLICY_ACTION_REDIRECT_TO_URL,
                         'redirect_url': 'bad url'}
         self.put(self.l7policy_path.format(l7policy_id=api_l7policy.get('id')),
-                 new_l7policy, status=400)
+                 new_l7policy, expect_errors=True)
 
     def test_update_with_bad_handler(self):
         api_l7policy = self.create_l7policy(
@@ -396,8 +395,7 @@ class TestL7Policy(base.BaseAPITest):
             self.lb.get('id'), self.listener.get('id'),
             constants.L7POLICY_ACTION_REJECT)
         self.set_lb_status(self.lb.get('id'))
-        self.delete(self.LB_DELETE_CASCADE_PATH.format(
-            lb_id=self.lb.get('id')))
+        self.delete(self.LB_PATH.format(lb_id=self.lb.get('id')))
         new_l7policy = {'action': constants.L7POLICY_ACTION_REDIRECT_TO_URL,
                         'redirect_url': 'http://www.example.com'}
         self.post(self.l7policies_path, body=new_l7policy, status=409)
@@ -407,8 +405,7 @@ class TestL7Policy(base.BaseAPITest):
             self.lb.get('id'), self.listener.get('id'),
             constants.L7POLICY_ACTION_REJECT)
         self.set_lb_status(self.lb.get('id'))
-        self.delete(self.LB_DELETE_CASCADE_PATH.format(
-            lb_id=self.lb.get('id')))
+        self.delete(self.LB_PATH.format(lb_id=self.lb.get('id')))
         new_l7policy = {'action': constants.L7POLICY_ACTION_REDIRECT_TO_URL,
                         'redirect_url': 'http://www.example.com'}
         self.put(self.l7policy_path.format(l7policy_id=l7policy.get('id')),
@@ -419,7 +416,6 @@ class TestL7Policy(base.BaseAPITest):
             self.lb.get('id'), self.listener.get('id'),
             constants.L7POLICY_ACTION_REJECT)
         self.set_lb_status(self.lb.get('id'))
-        self.delete(self.LB_DELETE_CASCADE_PATH.format(
-            lb_id=self.lb.get('id')))
+        self.delete(self.LB_PATH.format(lb_id=self.lb.get('id')))
         self.delete(self.l7policy_path.format(l7policy_id=l7policy.get('id')),
                     status=409)

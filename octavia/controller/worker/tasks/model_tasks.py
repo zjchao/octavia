@@ -28,14 +28,5 @@ class UpdateAttributes(task.Task):
     """Task to update an object for changes."""
 
     def execute(self, object, update_dict):
-        """Update an object and its associated resources.
 
-        Note: This relies on the data_model update() methods to handle complex
-              objects with nested objects (LoadBalancer.vip,
-              Pool.session_persistence, etc.)
-
-        :param object: The object will be updated.
-        :param update_dict: The updates dictionary.
-        :returns: None
-        """
         object.update(update_dict)

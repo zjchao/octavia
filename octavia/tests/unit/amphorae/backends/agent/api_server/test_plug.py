@@ -13,12 +13,10 @@
 #    under the License.
 
 import os
-import subprocess
 
 import mock
 import netifaces
 
-from octavia.amphorae.backends.agent.api_server import osutils
 from octavia.amphorae.backends.agent.api_server import plug
 import octavia.tests.unit.base as base
 
@@ -36,11 +34,8 @@ FAKE_INTERFACE = 'eth0'
 class TestPlug(base.TestCase):
     def setUp(self):
         super(TestPlug, self).setUp()
+
         self.mock_netifaces = mock.patch.object(plug, "netifaces").start()
-        self.mock_platform = mock.patch("distro.id").start()
-        self.mock_platform.return_value = "ubuntu"
-        self.osutil = osutils.BaseOS.get_os_util()
-        self.test_plug = plug.Plug(self.osutil)
         self.addCleanup(self.mock_netifaces.stop)
 
         # Set up our fake interface
@@ -52,20 +47,11 @@ class TestPlug(base.TestCase):
             ]
         }
 
-    def test__interface_by_mac_case_insensitive_ubuntu(self):
-        interface = self.test_plug._interface_by_mac(FAKE_MAC_ADDRESS.upper())
+    def test__interface_by_mac_case_insensitive(self):
+        interface = plug._interface_by_mac(FAKE_MAC_ADDRESS.upper())
         self.assertEqual(FAKE_INTERFACE, interface)
 
-    def test__interface_by_mac_case_insensitive_rh(self):
-        with mock.patch('distro.id', return_value='centos'):
-            osutil = osutils.BaseOS.get_os_util()
-            self.test_plug = plug.Plug(osutil)
-            interface = self.test_plug._interface_by_mac(
-                FAKE_MAC_ADDRESS.upper())
-            self.assertEqual(FAKE_INTERFACE, interface)
-
-    @mock.patch('pyroute2.NSPopen')
-    @mock.patch.object(plug, "webob")
+    @mock.patch.object(plug, "flask")
     @mock.patch('pyroute2.IPRoute')
     @mock.patch('pyroute2.netns.create')
     @mock.patch('pyroute2.NetNS')
@@ -74,34 +60,22 @@ class TestPlug(base.TestCase):
     @mock.patch('os.makedirs')
     def test_plug_vip_ipv4(self, mock_makedirs, mock_copytree,
                            mock_check_output, mock_netns, mock_netns_create,
-                           mock_pyroute2, mock_webob, mock_nspopen):
+                           mock_pyroute2, mock_flask):
         m = mock.mock_open()
         with mock.patch('os.open'), mock.patch.object(os, 'fdopen', m):
-            self.test_plug.plug_vip(
+            plug.plug_vip(
                 vip=FAKE_IP_IPV4,
                 subnet_cidr=FAKE_CIDR_IPV4,
                 gateway=FAKE_GATEWAY_IPV4,
                 mac_address=FAKE_MAC_ADDRESS
             )
-        mock_webob.Response.assert_any_call(json={
+        mock_flask.jsonify.assert_any_call({
             'message': 'OK',
             'details': 'VIP {vip} plugged on interface {interface}'.format(
                 vip=FAKE_IP_IPV4, interface='eth1')
-        }, status=202)
-        calls = [mock.call('amphora-haproxy', ['/sbin/sysctl', '--system'],
-                           stdout=subprocess.PIPE),
-                 mock.call('amphora-haproxy', ['modprobe', 'ip_vs'],
-                           stdout=subprocess.PIPE),
-                 mock.call('amphora-haproxy',
-                           ['/sbin/sysctl', '-w', 'net.ipv4.ip_forward=1'],
-                           stdout=subprocess.PIPE),
-                 mock.call('amphora-haproxy',
-                           ['/sbin/sysctl', '-w', 'net.ipv4.vs.conntrack=1'],
-                           stdout=subprocess.PIPE)]
-        mock_nspopen.assert_has_calls(calls, any_order=True)
+        })
 
-    @mock.patch('pyroute2.NSPopen')
-    @mock.patch.object(plug, "webob")
+    @mock.patch.object(plug, "flask")
     @mock.patch('pyroute2.IPRoute')
     @mock.patch('pyroute2.netns.create')
     @mock.patch('pyroute2.NetNS')
@@ -110,34 +84,22 @@ class TestPlug(base.TestCase):
     @mock.patch('os.makedirs')
     def test_plug_vip_ipv6(self, mock_makedirs, mock_copytree,
                            mock_check_output, mock_netns, mock_netns_create,
-                           mock_pyroute2, mock_webob, mock_nspopen):
+                           mock_pyroute2, mock_flask):
         m = mock.mock_open()
         with mock.patch('os.open'), mock.patch.object(os, 'fdopen', m):
-            self.test_plug.plug_vip(
+            plug.plug_vip(
                 vip=FAKE_IP_IPV6,
                 subnet_cidr=FAKE_CIDR_IPV6,
                 gateway=FAKE_GATEWAY_IPV6,
                 mac_address=FAKE_MAC_ADDRESS
             )
-        mock_webob.Response.assert_any_call(json={
+        mock_flask.jsonify.assert_any_call({
             'message': 'OK',
             'details': 'VIP {vip} plugged on interface {interface}'.format(
                 vip=FAKE_IP_IPV6_EXPANDED, interface='eth1')
-        }, status=202)
-        calls = [mock.call('amphora-haproxy', ['/sbin/sysctl', '--system'],
-                           stdout=subprocess.PIPE),
-                 mock.call('amphora-haproxy', ['modprobe', 'ip_vs'],
-                           stdout=subprocess.PIPE),
-                 mock.call('amphora-haproxy',
-                           ['/sbin/sysctl', '-w',
-                            'net.ipv6.conf.all.forwarding=1'],
-                           stdout=subprocess.PIPE),
-                 mock.call('amphora-haproxy',
-                           ['/sbin/sysctl', '-w', 'net.ipv4.vs.conntrack=1'],
-                           stdout=subprocess.PIPE)]
-        mock_nspopen.assert_has_calls(calls, any_order=True)
+        })
 
-    @mock.patch.object(plug, "webob")
+    @mock.patch.object(plug, "flask")
     @mock.patch('pyroute2.IPRoute')
     @mock.patch('pyroute2.netns.create')
     @mock.patch('pyroute2.NetNS')
@@ -146,17 +108,16 @@ class TestPlug(base.TestCase):
     @mock.patch('os.makedirs')
     def test_plug_vip_bad_ip(self, mock_makedirs, mock_copytree,
                              mock_check_output, mock_netns, mock_netns_create,
-                             mock_pyroute2, mock_webob):
+                             mock_pyroute2, mock_flask):
         m = mock.mock_open()
         with mock.patch('os.open'), mock.patch.object(os, 'fdopen', m):
-            self.test_plug.plug_vip(
+            plug.plug_vip(
                 vip="error",
                 subnet_cidr=FAKE_CIDR_IPV4,
                 gateway=FAKE_GATEWAY_IPV4,
                 mac_address=FAKE_MAC_ADDRESS
             )
-        mock_webob.Response.assert_any_call(json={'message': 'Invalid VIP'},
-                                            status=400)
+        mock_flask.jsonify.assert_any_call({'message': 'Invalid VIP'})
 
     @mock.patch('pyroute2.NetNS')
     def test__netns_interface_exists(self, mock_netns):
@@ -167,21 +128,15 @@ class TestPlug(base.TestCase):
             'attrs': [['IFLA_ADDRESS', '123']]}]
 
         # Interface is found in netns
-        self.assertTrue(self.test_plug._netns_interface_exists('123'))
+        self.assertTrue(plug._netns_interface_exists('123'))
 
         # Interface is not found in netns
-        self.assertFalse(self.test_plug._netns_interface_exists('321'))
+        self.assertFalse(plug._netns_interface_exists('321'))
 
 
 class TestPlugNetwork(base.TestCase):
-    def setUp(self):
-        super(TestPlugNetwork, self).setUp()
-        self.mock_platform = mock.patch("distro.id").start()
-        self.mock_platform.return_value = "ubuntu"
-        self.osutil = osutils.BaseOS.get_os_util()
-        self.test_plug = plug.Plug(self.osutil)
 
-    def test__generate_network_file_text_static_ip_ubuntu(self):
+    def test__generate_network_file_text_static_ip(self):
         netns_interface = 'eth1234'
         FIXED_IP = '192.0.2.2'
         BROADCAST = '192.0.2.255'
@@ -190,39 +145,26 @@ class TestPlugNetwork(base.TestCase):
         DEST1 = '198.51.100.0/24'
         DEST2 = '203.0.113.0/24'
         NEXTHOP = '192.0.2.1'
-        MTU = 1450
         fixed_ips = [{'ip_address': FIXED_IP,
                       'subnet_cidr': SUBNET_CIDR,
                       'host_routes': [
                           {'destination': DEST1, 'nexthop': NEXTHOP},
                           {'destination': DEST2, 'nexthop': NEXTHOP}
                       ]}]
-        format_text = (
+        text = plug._generate_network_file_text(netns_interface, fixed_ips)
+        expected_text = (
             '\n\n# Generated by Octavia agent\n'
-            'auto {netns_interface}\n'
-            'iface {netns_interface} inet static\n'
-            'address {fixed_ip}\n'
-            'broadcast {broadcast}\n'
-            'netmask {netmask}\n'
-            'mtu {mtu}\n'
-            'up route add -net {dest1} gw {nexthop} dev {netns_interface}\n'
-            'down route del -net {dest1} gw {nexthop} dev {netns_interface}\n'
-            'up route add -net {dest2} gw {nexthop} dev {netns_interface}\n'
-            'down route del -net {dest2} gw {nexthop} dev {netns_interface}\n'
-            'post-up /sbin/iptables -t nat -A POSTROUTING -p udp -o '
-            'eth1234 -j MASQUERADE\n'
-            'post-down /sbin/iptables -t nat -D POSTROUTING -p udp -o eth1234 '
-            '-j MASQUERADE\n')
-
-        template_port = osutils.j2_env.get_template('plug_port_ethX.conf.j2')
-        text = self.test_plug._osutils._generate_network_file_text(
-            netns_interface, fixed_ips, MTU, template_port)
-        expected_text = format_text.format(netns_interface=netns_interface,
-                                           fixed_ip=FIXED_IP,
-                                           broadcast=BROADCAST,
-                                           netmask=NETMASK,
-                                           mtu=MTU,
-                                           dest1=DEST1,
-                                           dest2=DEST2,
-                                           nexthop=NEXTHOP)
+            'auto ' + netns_interface + '\n'
+            'iface ' + netns_interface + ' inet static\n'
+            'address ' + FIXED_IP + '\n'
+            'broadcast ' + BROADCAST + '\n'
+            'netmask ' + NETMASK + '\n'
+            'up route add -net ' + DEST1 + ' gw ' + NEXTHOP +
+            ' dev ' + netns_interface + '\n'
+            'down route del -net ' + DEST1 + ' gw ' + NEXTHOP +
+            ' dev ' + netns_interface + '\n'
+            'up route add -net ' + DEST2 + ' gw ' + NEXTHOP +
+            ' dev ' + netns_interface + '\n'
+            'down route del -net ' + DEST2 + ' gw ' + NEXTHOP +
+            ' dev ' + netns_interface + '\n')
         self.assertEqual(expected_text, text)

@@ -16,11 +16,11 @@ git clone https://github.com/openstack-dev/devstack.git $HOME/devstack
 
 cat <<EOF > $HOME/devstack/localrc
 enable_plugin barbican https://review.openstack.org/openstack/barbican
-enable_plugin neutron https://review.openstack.org/openstack/neutron
+enable_plugin neutron-lbaas https://review.openstack.org/openstack/neutron-lbaas
 enable_plugin octavia https://review.openstack.org/openstack/octavia
-LIBS_FROM_GIT+=python-octaviaclient
+LIBS_FROM_GIT+=python-neutronclient
 
-KEYSTONE_TOKEN_FORMAT=fernet
+KEYSTONE_TOKEN_FORMAT=UUID
 
 DATABASE_PASSWORD=secretdatabase
 RABBIT_PASSWORD=secretrabbit
@@ -31,17 +31,19 @@ SERVICE_TOKEN=111222333444
 LOGFILE=/opt/stack/logs/stack.sh.log
 VERBOSE=True
 LOG_COLOR=True
+SCREEN_LOGDIR=/opt/stack/logs
 # Pre-requisite
 ENABLED_SERVICES=key,rabbit,mysql
 # Nova
-ENABLED_SERVICES+=,n-api,n-obj,n-cpu,n-cond,n-sch
-# Placement service needed for Nova
-ENABLED_SERVICES+=,placement-api,placement-client
+ENABLED_SERVICES+=,n-api,n-crt,n-obj,n-cpu,n-cond,n-sch
 # Glance
 ENABLED_SERVICES+=,g-api,g-reg
 # Neutron
-ENABLED_SERVICES+=,neutron-api,neutron-agent,neutron-dhcp,neutron-l3
-ENABLED_SERVICES+=,neutron-metadata-agent,neutron-qos
+ENABLED_SERVICES+=,q-svc,q-agt,q-dhcp,q-l3,q-meta,neutron
+# Enable LBaaS V2
+ENABLED_SERVICES+=,q-lbaasv2
+# Cinder (optional)
+#ENABLED_SERVICES+=,cinder,c-api,c-vol,c-sch
 # Tempest (optional)
 #ENABLED_SERVICES+=,tempest
 # Octavia

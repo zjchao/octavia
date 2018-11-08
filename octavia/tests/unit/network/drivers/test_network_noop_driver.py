@@ -15,8 +15,8 @@
 import mock
 from oslo_utils import uuidutils
 
-from octavia.db import models
-from octavia.network.drivers.noop_driver import driver
+from octavia.db import models as models
+from octavia.network.drivers.noop_driver import driver as driver
 import octavia.tests.unit.base as base
 
 
@@ -25,8 +25,6 @@ class TestNoopNetworkDriver(base.TestCase):
     FAKE_UUID_2 = uuidutils.generate_uuid()
     FAKE_UUID_3 = uuidutils.generate_uuid()
     FAKE_UUID_4 = uuidutils.generate_uuid()
-    FAKE_UUID_5 = uuidutils.generate_uuid()
-    FAKE_UUID_6 = uuidutils.generate_uuid()
 
     def setUp(self):
         super(TestNoopNetworkDriver, self).setUp()
@@ -44,35 +42,16 @@ class TestNoopNetworkDriver(base.TestCase):
 
         self.vip = models.Vip()
         self.vip.ip_address = "10.0.0.1"
-        self.vip.subnet_id = uuidutils.generate_uuid()
-        self.vip.port_id = uuidutils.generate_uuid()
         self.amphora_id = self.FAKE_UUID_1
         self.compute_id = self.FAKE_UUID_2
         self.subnet_id = self.FAKE_UUID_3
         self.subnet_name = 'subnet1'
-        self.qos_policy_id = self.FAKE_UUID_5
-        self.vrrp_port_id = self.FAKE_UUID_6
-
-        self.amphora1 = models.Amphora()
-        self.amphora1.id = uuidutils.generate_uuid()
-        self.amphora1.vrrp_port_id = uuidutils.generate_uuid()
-        self.amphora1.ha_port_id = uuidutils.generate_uuid()
-        self.amphora1.vrrp_ip = '10.0.1.10'
-        self.amphora1.ha_ip = '10.0.1.11'
-        self.amphora2 = models.Amphora()
-        self.amphora2.id = uuidutils.generate_uuid()
-        self.amphora2.vrrp_port_id = uuidutils.generate_uuid()
-        self.amphora2.ha_port_id = uuidutils.generate_uuid()
-        self.amphora2.vrrp_ip = '10.0.2.10'
-        self.amphora2.ha_ip = '10.0.2.11'
-        self.load_balancer.amphorae = [self.amphora1, self.amphora2]
-        self.load_balancer.vip = self.vip
 
     def test_allocate_vip(self):
         self.driver.allocate_vip(self.load_balancer)
         self.assertEqual(
             (self.load_balancer, 'allocate_vip'),
-            self.driver.driver.networkconfigconfig[self.load_balancer.id])
+            self.driver.driver.networkconfigconfig[self.load_balancer])
 
     def test_deallocate_vip(self):
         self.driver.deallocate_vip(self.vip)
@@ -121,9 +100,9 @@ class TestNoopNetworkDriver(base.TestCase):
 
     def test_update_vip(self):
         self.driver.update_vip(self.load_balancer)
-        self.assertEqual((self.load_balancer, False, 'update_vip'),
+        self.assertEqual((self.load_balancer, 'update_vip'),
                          self.driver.driver.networkconfigconfig[(
-                             self.load_balancer.id
+                             self.load_balancer
                          )])
 
     def test_get_network(self):
@@ -179,34 +158,15 @@ class TestNoopNetworkDriver(base.TestCase):
         )
 
     def test_plug_port(self):
-        self.driver.plug_port(self.amphora1, self.port)
+        self.driver.plug_port(self.compute_id, self.port)
         self.assertEqual(
-            (self.amphora1, self.port, 'plug_port'),
-            self.driver.driver.networkconfigconfig[self.amphora1.id,
-                                                   self.port.id]
+            (self.compute_id, self.port, 'plug_port'),
+            self.driver.driver.networkconfigconfig[self.compute_id, self.port]
         )
 
     def test_get_network_configs(self):
-        amp_config = self.driver.get_network_configs(self.load_balancer)
+        self.driver.get_network_configs(self.load_balancer)
         self.assertEqual(
             (self.load_balancer, 'get_network_configs'),
-            self.driver.driver.networkconfigconfig[self.load_balancer.id]
-        )
-        self.assertEqual(2, len(amp_config))
-        self.assertEqual(self.amphora1, amp_config[self.amphora1.id].amphora)
-        self.assertEqual(self.amphora2, amp_config[self.amphora2.id].amphora)
-
-    def test_get_qos_policy(self):
-        self.driver.get_qos_policy(self.qos_policy_id)
-        self.assertEqual(
-            (self.qos_policy_id, 'get_qos_policy'),
-            self.driver.driver.networkconfigconfig[self.qos_policy_id]
-        )
-
-    def test_apply_qos_on_port(self):
-        self.driver.apply_qos_on_port(self.qos_policy_id, self.vrrp_port_id)
-        self.assertEqual(
-            (self.qos_policy_id, self.vrrp_port_id, 'apply_qos_on_port'),
-            self.driver.driver.networkconfigconfig[self.qos_policy_id,
-                                                   self.vrrp_port_id]
+            self.driver.driver.networkconfigconfig[self.load_balancer]
         )

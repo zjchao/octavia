@@ -15,10 +15,8 @@
 import socket
 
 import mock
-import six
 
 from octavia.amphorae.backends.utils import haproxy_query as query
-from octavia.common import constants
 import octavia.tests.unit.base as base
 
 STATS_SOCKET_SAMPLE = (
@@ -39,10 +37,6 @@ STATS_SOCKET_SAMPLE = (
     "1,5,1,,0,,2,0,,0,L4TOUT,,30000,,,,,,,0,,,,0,0,,,,,-1,,,0,0,0,0,\n"
     "tcp-servers,id-34836,0,0,0,0,,0,0,0,,0,,0,0,0,0,UP,1,1,0,1,1,552,552,,"
     "1,5,2,,0,,2,0,,0,L4TOUT,,30001,,,,,,,0,,,,0,0,,,,,-1,,,0,0,0,0,\n"
-    "tcp-servers,id-34839,0,0,0,0,,0,0,0,,0,,0,0,0,0,DRAIN,0,1,0,0,0,552,0,,"
-    "1,5,2,,0,,2,0,,0,L7OK,,30001,,,,,,,0,,,,0,0,,,,,-1,,,0,0,0,0,\n"
-    "tcp-servers,id-34842,0,0,0,0,,0,0,0,,0,,0,0,0,0,MAINT,0,1,0,0,0,552,0,,"
-    "1,5,2,,0,,2,0,,0,L7OK,,30001,,,,,,,0,,,,0,0,,,,,-1,,,0,0,0,0,\n"
     "tcp-servers,BACKEND,0,0,0,0,200,0,0,0,0,0,,0,0,0,0,UP,0,0,0,,1,552,552"
     ",,1,5,0,,0,,1,0,,0,,,,,,,,,,,,,,0,0,0,0,0,0,-1,,,0,0,0,0,"
 )
@@ -81,13 +75,13 @@ class QueryTestCase(base.TestCase):
         self.q._query('test')
 
         sock.connect.assert_called_once_with('')
-        sock.send.assert_called_once_with(six.b('test\n'))
+        sock.send.assert_called_once_with('test' + '\n')
         sock.recv.assert_called_with(1024)
         self.assertTrue(sock.close.called)
 
-        self.assertRaisesRegex(Exception,
-                               'HAProxy \'test\' query failed.',
-                               self.q._query, 'test')
+        self.assertRaisesRegexp(Exception,
+                                'HAProxy \'test\' query failed.',
+                                self.q._query, 'test')
 
     def test_get_pool_status(self):
         query_mock = mock.Mock()
@@ -95,19 +89,17 @@ class QueryTestCase(base.TestCase):
         query_mock.return_value = STATS_SOCKET_SAMPLE
         self.assertEqual(
             {'tcp-servers': {
-                'status': constants.UP,
+                'status': 'UP',
                 'uuid': 'tcp-servers',
                 'members':
-                    {'id-34833': constants.UP,
-                     'id-34836': constants.UP,
-                     'id-34839': constants.DRAIN,
-                     'id-34842': constants.MAINT}},
+                    {'id-34833': 'UP',
+                     'id-34836': 'UP'}},
              'http-servers': {
-                'status': constants.DOWN,
+                'status': 'DOWN',
                 'uuid': 'http-servers',
                 'members':
-                    {'id-34821': constants.DOWN,
-                     'id-34824': constants.DOWN}}},
+                    {'id-34821': 'DOWN',
+                     'id-34824': 'DOWN'}}},
             self.q.get_pool_status()
         )
 

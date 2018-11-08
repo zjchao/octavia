@@ -13,7 +13,6 @@
 #    under the License.
 
 from oslo_db.sqlalchemy import models
-from oslo_utils import strutils
 from oslo_utils import uuidutils
 import sqlalchemy as sa
 from sqlalchemy.ext import declarative
@@ -44,8 +43,6 @@ class OctaviaBase(models.ModelBase):
         elif obj.__class__.__name__ in ['SNI']:
             return (obj.__class__.__name__ +
                     obj.listener_id + obj.tls_container_id)
-        elif obj.__class__.__name__ in ['Quotas']:
-            return obj.__class__.__name__ + obj.project_id
         else:
             raise NotImplementedError
 
@@ -103,31 +100,6 @@ class OctaviaBase(models.ModelBase):
                         listref.append(item)
         return dm_self
 
-    @staticmethod
-    def apply_filter(query, model, filters):
-        translated_filters = {}
-        child_map = {}
-        # Convert enabled to proper type
-        if 'enabled' in filters:
-            filters['enabled'] = strutils.bool_from_string(
-                filters['enabled'])
-        for attr, name_map in model.__v2_wsme__._child_map.items():
-            for k, v in name_map.items():
-                if attr in filters and k in filters[attr]:
-                    child_map.setdefault(attr, {}).update(
-                        {k: filters[attr].pop(k)})
-            filters.pop(attr, None)
-
-        for k, v in model.__v2_wsme__._type_to_model_map.items():
-            if k in filters:
-                translated_filters[v] = filters.pop(k)
-        translated_filters.update(filters)
-        if translated_filters:
-            query = query.filter_by(**translated_filters)
-        for k, v in child_map.items():
-            query = query.join(getattr(model, k)).filter_by(**v)
-        return query
-
 
 class LookupTableMixin(object):
     """Mixin to add to classes that are lookup tables."""
@@ -144,11 +116,6 @@ class IdMixin(object):
 class ProjectMixin(object):
     """Tenant mixin, add to subclasses that have a project."""
     project_id = sa.Column(sa.String(36))
-
-
-class NameMixin(object):
-    """Name mixin to add to classes which need a name."""
-    name = sa.Column(sa.String(255), nullable=True)
 
 
 BASE = declarative.declarative_base(cls=OctaviaBase)

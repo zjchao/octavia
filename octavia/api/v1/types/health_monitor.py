@@ -14,7 +14,7 @@
 
 from wsme import types as wtypes
 
-from octavia.api.common import types as base
+from octavia.api.v1.types import base
 from octavia.common import constants
 
 
@@ -41,14 +41,10 @@ class HealthMonitorPOST(base.BaseType):
     timeout = wtypes.wsattr(wtypes.IntegerType(), mandatory=True)
     fall_threshold = wtypes.wsattr(wtypes.IntegerType(), mandatory=True)
     rise_threshold = wtypes.wsattr(wtypes.IntegerType(), mandatory=True)
-    http_method = wtypes.wsattr(
-        wtypes.text, default=constants.HEALTH_MONITOR_HTTP_DEFAULT_METHOD)
-    url_path = wtypes.wsattr(
-        wtypes.text, default=constants.HEALTH_MONITOR_DEFAULT_URL_PATH)
-    expected_codes = wtypes.wsattr(
-        wtypes.text, default=constants.HEALTH_MONITOR_DEFAULT_EXPECTED_CODES)
+    http_method = wtypes.wsattr(wtypes.text)
+    url_path = wtypes.wsattr(wtypes.text)
+    expected_codes = wtypes.wsattr(wtypes.text)
     enabled = wtypes.wsattr(bool, default=True)
-    # TODO(johnsom) Remove after deprecation (R series)
     project_id = wtypes.wsattr(wtypes.StringType(max_length=36))
 
 

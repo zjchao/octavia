@@ -51,16 +51,8 @@ def generate(flow_list, output_directory):
                                     current_tuple[1])
             current_instance = current_class()
             get_flow_method = getattr(current_instance, current_tuple[2])
-            if (current_tuple[1] == 'AmphoraFlows' and
-                    current_tuple[2] == 'get_failover_flow'):
-                amp1 = dmh.generate_amphora()
-                amp2 = dmh.generate_amphora()
-                lb = dmh.generate_load_balancer(amphorae=[amp1, amp2])
-                current_engine = engines.load(
-                    get_flow_method(role=constants.ROLE_STANDALONE,
-                                    load_balancer=lb))
-            elif (current_tuple[1] == 'LoadBalancerFlows' and
-                  current_tuple[2] == 'get_create_load_balancer_flow'):
+            if (current_tuple[1] == 'LoadBalancerFlows' and
+                    current_tuple[2] == 'get_create_load_balancer_flow'):
                 current_engine = engines.load(
                     get_flow_method(
                         constants.TOPOLOGY_ACTIVE_STANDBY))
@@ -74,10 +66,6 @@ def generate(flow_list, output_directory):
                 lb = dmh.generate_load_balancer()
                 delete_flow, store = get_flow_method(lb)
                 current_engine = engines.load(delete_flow)
-            elif (current_tuple[1] == 'MemberFlows' and
-                  current_tuple[2] == 'get_batch_update_members_flow'):
-                current_engine = engines.load(
-                    get_flow_method([], [], []))
             else:
                 current_engine = engines.load(get_flow_method())
             current_engine.compile()
@@ -105,7 +93,7 @@ def generate(flow_list, output_directory):
             current_doc_file.write('.. image:: ' + doc_tuple[0] +
                                    '-' + doc_tuple[1] + '.svg\n')
             current_doc_file.write('    :width: 660px\n')
-            current_doc_file.write('    :target: ../../../_images/' +
+            current_doc_file.write('    :target: ../../_images/' +
                                    doc_tuple[0] +
                                    '-' + doc_tuple[1] + '.svg\n')
 
@@ -136,7 +124,7 @@ def generate(flow_list, output_directory):
             current_doc_file.write('.. image:: ' + doc_tuple[0] +
                                    '-' + doc_tuple[1] + '.svg\n')
             current_doc_file.write('    :width: 660px\n')
-            current_doc_file.write('    :target: ../../../_images/' +
+            current_doc_file.write('    :target: ../../_images/' +
                                    doc_tuple[0] +
                                    '-' + doc_tuple[1] + '.svg\n')
 

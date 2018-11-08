@@ -36,9 +36,8 @@ class TestHealthMonitorFlows(base.TestCase):
 
         self.assertIn(constants.LISTENERS, health_mon_flow.requires)
         self.assertIn(constants.LOADBALANCER, health_mon_flow.requires)
-        self.assertIn(constants.POOL, health_mon_flow.requires)
 
-        self.assertEqual(4, len(health_mon_flow.requires))
+        self.assertEqual(3, len(health_mon_flow.requires))
         self.assertEqual(0, len(health_mon_flow.provides))
 
     def test_get_delete_health_monitor_flow(self):
@@ -49,9 +48,8 @@ class TestHealthMonitorFlows(base.TestCase):
         self.assertIsInstance(health_mon_flow, flow.Flow)
 
         self.assertIn(constants.HEALTH_MON, health_mon_flow.requires)
+        self.assertIn(constants.POOL_ID, health_mon_flow.requires)
         self.assertIn(constants.LISTENERS, health_mon_flow.requires)
-        self.assertIn(constants.LOADBALANCER, health_mon_flow.requires)
-        self.assertIn(constants.POOL, health_mon_flow.requires)
 
         self.assertEqual(4, len(health_mon_flow.requires))
         self.assertEqual(0, len(health_mon_flow.provides))
@@ -68,5 +66,5 @@ class TestHealthMonitorFlows(base.TestCase):
         self.assertIn(constants.HEALTH_MON, health_mon_flow.requires)
         self.assertIn(constants.UPDATE_DICT, health_mon_flow.requires)
 
-        self.assertEqual(5, len(health_mon_flow.requires))
+        self.assertEqual(4, len(health_mon_flow.requires))
         self.assertEqual(0, len(health_mon_flow.provides))

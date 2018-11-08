@@ -23,7 +23,7 @@ from oslo_config import cfg
 service_option = cfg.BoolOpt('octavia',
                              default=False,
                              help="Whether or not Octavia is expected to be "
-                                  "available")
+                                  "available"),
 
 octavia_group = cfg.OptGroup(name='octavia', title='Octavia Service')
 
@@ -31,18 +31,9 @@ OctaviaGroup = [
     cfg.StrOpt('catalog_type',
                default='network',
                help='Catalog type of the Octavia service.'),
-    cfg.IntOpt('build_interval',
-               default=5,
-               help='Time in seconds between build status checks for '
-                    'non-load-balancer resources to build'),
-    cfg.IntOpt('build_timeout',
-               default=30,
-               help='Timeout in seconds to wait for non-load-balancer '
-                    'resources to build'),
     cfg.IntOpt('lb_build_interval',
                default=15,
-               help='Time in seconds between build status checks for a '
-                    'load balancer.'),
+               help='Time in seconds between build status checks.'),
     cfg.IntOpt('lb_build_timeout',
                default=900,
                help='Timeout in seconds to wait for a '

@@ -20,7 +20,6 @@ from oslo_utils import uuidutils
 import six
 
 from octavia.amphorae.backends.health_daemon import health_daemon
-from octavia.common import constants
 import octavia.tests.unit.base as base
 
 if six.PY2:
@@ -104,33 +103,23 @@ SAMPLE_STATS = ({'': '', 'status': 'OPEN', 'lastchg': '',
                  'hrsp_2xx': '0', 'act': '1', 'chkdown': '0',
                  'svname': 'BACKEND', 'hrsp_3xx': '0'})
 
-SAMPLE_STATS_MSG = {
-    'listeners': {
-        LISTENER_ID1: {
-            'pools': {
-                '432fc8b3-d446-48d4-bb64-13beb90e22bc': {
-                    'members': {
-                        '302e33d9-dee1-4de9-98d5-36329a06fb58': 'DOWN'},
-                    'status': 'UP'}},
-            'stats': {
-                'totconns': 0, 'conns': 0,
-                'tx': 0, 'rx': 0, 'ereq': 0},
-            'status': 'OPEN'},
-        LISTENER_ID2: {
-            'pools': {
-                '432fc8b3-d446-48d4-bb64-13beb90e22bc': {
-                    'members': {
-                        '302e33d9-dee1-4de9-98d5-36329a06fb58': 'DOWN'},
-                    'status': 'UP'}},
-            'stats': {
-                'totconns': 0, 'conns': 0,
-                'tx': 0, 'rx': 0, 'ereq': 0},
-            'status': 'OPEN'}
-    },
-    'id': None,
-    'seq': 0,
-    'ver': health_daemon.MSG_VER
-}
+SAMPLE_STATS_MSG = {'listeners': {
+                    LISTENER_ID1: {
+                        'pools': {'432fc8b3-d446-48d4-bb64-13beb90e22bc': {
+                            'members': {
+                                '302e33d9-dee1-4de9-98d5-36329a06fb58':
+                                'DOWN'},
+                            'status': 'UP'}}, 'stats': {
+                            'totconns': 0, 'conns': 0, 'tx': 0, 'rx': 0},
+                        'status': 'OPEN'},
+                    LISTENER_ID2: {
+                        'pools': {'432fc8b3-d446-48d4-bb64-13beb90e22bc': {
+                            'members': {
+                                '302e33d9-dee1-4de9-98d5-36329a06fb58':
+                                'DOWN'},
+                            'status': 'UP'}}, 'stats': {
+                            'totconns': 0, 'conns': 0, 'tx': 0, 'rx': 0},
+                        'status': 'OPEN'}}, 'id': None, 'seq': 0}
 
 
 class TestHealthDaemon(base.TestCase):
@@ -153,10 +142,8 @@ class TestHealthDaemon(base.TestCase):
                           LISTENER_ID1 + '.sock',
                           LISTENER_ID2: BASE_PATH + '/' +
                           LISTENER_ID2 + '.sock'}
-        self.assertEqual(expected_files, files)
+        self.assertEqual(files, expected_files)
 
-    @mock.patch('os.kill')
-    @mock.patch('os.path.isfile')
     @mock.patch('octavia.amphorae.backends.health_daemon.'
                 'health_daemon.time.sleep')
     @mock.patch('oslo_config.cfg.CONF.reload_config_files')
@@ -165,31 +152,25 @@ class TestHealthDaemon(base.TestCase):
     @mock.patch('octavia.amphorae.backends.health_daemon.'
                 'health_sender.UDPStatusSender')
     def test_run_sender(self, mock_UDPStatusSender, mock_build_msg,
-                        mock_reload_cfg, mock_sleep, mock_isfile, mock_kill):
+                        mock_reload_cfg, mock_sleep):
         sender_mock = mock.MagicMock()
         dosend_mock = mock.MagicMock()
         sender_mock.dosend = dosend_mock
         mock_UDPStatusSender.return_value = sender_mock
-        mock_build_msg.side_effect = ['TEST']
-
-        mock_isfile.return_value = False
+        mock_build_msg.side_effect = ['TEST', Exception('break')]
 
         test_queue = queue.Queue()
-        with mock.patch('time.sleep') as mock_sleep:
-            mock_sleep.side_effect = Exception('break')
-            self.assertRaisesRegex(Exception, 'break',
-                                   health_daemon.run_sender, test_queue)
+        self.assertRaisesRegexp(Exception, 'break',
+                                health_daemon.run_sender, test_queue)
 
         sender_mock.dosend.assert_called_once_with('TEST')
 
         # Test a reload event
         mock_build_msg.reset_mock()
-        mock_build_msg.side_effect = ['TEST']
+        mock_build_msg.side_effect = ['TEST', Exception('break')]
         test_queue.put('reload')
-        with mock.patch('time.sleep') as mock_sleep:
-            mock_sleep.side_effect = Exception('break')
-            self.assertRaisesRegex(Exception, 'break',
-                                   health_daemon.run_sender, test_queue)
+        self.assertRaisesRegexp(Exception, 'break',
+                                health_daemon.run_sender, test_queue)
         mock_reload_cfg.assert_called_once_with()
 
         # Test the shutdown path
@@ -203,88 +184,10 @@ class TestHealthDaemon(base.TestCase):
 
         # Test an unknown command
         mock_build_msg.reset_mock()
-        mock_build_msg.side_effect = ['TEST']
+        mock_build_msg.side_effect = ['TEST', Exception('break')]
         test_queue.put('bogus')
-        with mock.patch('time.sleep') as mock_sleep:
-            mock_sleep.side_effect = Exception('break')
-            self.assertRaisesRegex(Exception, 'break',
-                                   health_daemon.run_sender, test_queue)
-
-        # Test keepalived config, but no PID
-        mock_build_msg.reset_mock()
-        dosend_mock.reset_mock()
-        mock_isfile.return_value = True
-        with mock.patch('octavia.amphorae.backends.health_daemon.'
-                        'health_daemon.open', mock.mock_open()) as mock_open:
-            mock_open.side_effect = FileNotFoundError
-            test_queue.put('shutdown')
-            health_daemon.run_sender(test_queue)
-            mock_build_msg.assert_not_called()
-            dosend_mock.assert_not_called()
-
-        # Test keepalived config, but PID file error
-        mock_build_msg.reset_mock()
-        dosend_mock.reset_mock()
-        mock_isfile.return_value = True
-        with mock.patch('octavia.amphorae.backends.health_daemon.'
-                        'health_daemon.open', mock.mock_open()) as mock_open:
-            mock_open.side_effect = IOError
-            test_queue.put('shutdown')
-            health_daemon.run_sender(test_queue)
-            mock_build_msg.assert_not_called()
-            dosend_mock.assert_not_called()
-
-        # Test keepalived config, but bogus PID
-        mock_build_msg.reset_mock()
-        dosend_mock.reset_mock()
-        mock_isfile.return_value = True
-        with mock.patch('octavia.amphorae.backends.health_daemon.'
-                        'health_daemon.open',
-                        mock.mock_open(read_data='foo')) as mock_open:
-            test_queue.put('shutdown')
-            health_daemon.run_sender(test_queue)
-            mock_build_msg.assert_not_called()
-            dosend_mock.assert_not_called()
-
-        # Test keepalived config, but not running
-        mock_build_msg.reset_mock()
-        dosend_mock.reset_mock()
-        mock_isfile.return_value = True
-        with mock.patch('octavia.amphorae.backends.health_daemon.'
-                        'health_daemon.open',
-                        mock.mock_open(read_data='999999')) as mock_open:
-            mock_kill.side_effect = ProccessNotFoundError
-            test_queue.put('shutdown')
-            health_daemon.run_sender(test_queue)
-            mock_build_msg.assert_not_called()
-            dosend_mock.assert_not_called()
-
-        # Test keepalived config, but process error
-        mock_build_msg.reset_mock()
-        dosend_mock.reset_mock()
-        mock_isfile.return_value = True
-        with mock.patch('octavia.amphorae.backends.health_daemon.'
-                        'health_daemon.open',
-                        mock.mock_open(read_data='999999')) as mock_open:
-            mock_kill.side_effect = OSError
-            test_queue.put('shutdown')
-            health_daemon.run_sender(test_queue)
-            mock_build_msg.assert_not_called()
-            dosend_mock.assert_not_called()
-
-        # Test with happy keepalive
-        sender_mock.reset_mock()
-        dosend_mock.reset_mock()
-        mock_kill.side_effect = [True]
-        mock_build_msg.reset_mock()
-        mock_build_msg.side_effect = ['TEST', 'TEST']
-        mock_isfile.return_value = True
-        test_queue.put('shutdown')
-        with mock.patch('octavia.amphorae.backends.health_daemon.'
-                        'health_daemon.open',
-                        mock.mock_open(read_data='999999')) as mock_open:
-            health_daemon.run_sender(test_queue)
-        sender_mock.dosend.assert_called_once_with('TEST')
+        self.assertRaisesRegexp(Exception, 'break',
+                                health_daemon.run_sender, test_queue)
 
     @mock.patch('octavia.amphorae.backends.utils.haproxy_query.HAProxyQuery')
     def test_get_stats(self, mock_query):
@@ -312,7 +215,7 @@ class TestHealthDaemon(base.TestCase):
 
         msg = health_daemon.build_stats_message()
 
-        self.assertEqual(SAMPLE_STATS_MSG, msg)
+        self.assertEqual(msg, SAMPLE_STATS_MSG)
 
         mock_get_stats.assert_any_call('TEST')
         mock_get_stats.assert_any_call('TEST2')
@@ -353,73 +256,4 @@ class TestHealthDaemon(base.TestCase):
 
         msg = health_daemon.build_stats_message()
 
-        self.assertEqual({}, msg['listeners'][LISTENER_ID1]['pools'])
-
-    @mock.patch("octavia.amphorae.backends.utils.keepalivedlvs_query."
-                "get_udp_listener_pool_status")
-    @mock.patch("octavia.amphorae.backends.utils.keepalivedlvs_query."
-                "get_udp_listeners_stats")
-    @mock.patch("octavia.amphorae.backends.agent.api_server.util."
-                "get_udp_listeners")
-    def test_bulid_stats_message_with_udp_listener(
-            self, mock_get_udp_listeners, mock_get_listener_stats,
-            mock_get_pool_status):
-        udp_listener_id1 = uuidutils.generate_uuid()
-        udp_listener_id2 = uuidutils.generate_uuid()
-        udp_listener_id3 = uuidutils.generate_uuid()
-        pool_id = uuidutils.generate_uuid()
-        member_id1 = uuidutils.generate_uuid()
-        member_id2 = uuidutils.generate_uuid()
-        mock_get_udp_listeners.return_value = [udp_listener_id1,
-                                               udp_listener_id2,
-                                               udp_listener_id3]
-        mock_get_listener_stats.return_value = {
-            udp_listener_id1: {
-                'status': constants.OPEN,
-                'stats': {'bin': 6387472, 'stot': 5, 'bout': 7490,
-                          'ereq': 0, 'scur': 0}},
-            udp_listener_id3: {
-                'status': constants.DOWN,
-                'stats': {'bin': 0, 'stot': 0, 'bout': 0,
-                          'ereq': 0, 'scur': 0}}
-        }
-        udp_pool_status = {
-            'lvs': {
-                'uuid': pool_id,
-                'status': constants.UP,
-                'members': {member_id1: constants.UP,
-                            member_id2: constants.UP}}}
-        mock_get_pool_status.side_effect = (
-            lambda x: udp_pool_status if x == udp_listener_id1 else {})
-        # the first listener can get all necessary info.
-        # the second listener can not get listener stats, so we won't report it
-        # the third listener can get listener stats, but can not get pool
-        # status, so the result will just contain the listener status for it.
-        expected = {
-            'listeners': {
-                udp_listener_id1: {
-                    'status': constants.OPEN,
-                    'pools': {
-                        pool_id: {
-                            'status': constants.UP,
-                            'members': {
-                                member_id1: constants.UP,
-                                member_id2: constants.UP}}},
-                    'stats': {'conns': 0, 'totconns': 5, 'ereq': 0,
-                              'rx': 6387472, 'tx': 7490}},
-                udp_listener_id3: {
-                    'status': constants.DOWN,
-                    'pools': {},
-                    'stats': {'conns': 0, 'totconns': 0, 'ereq': 0,
-                              'rx': 0, 'tx': 0}}}, 'id': None,
-                    'seq': mock.ANY, 'ver': health_daemon.MSG_VER}
-        msg = health_daemon.build_stats_message()
-        self.assertEqual(expected, msg)
-
-
-class FileNotFoundError(IOError):
-    errno = 2
-
-
-class ProccessNotFoundError(OSError):
-    errno = 3
+        self.assertEqual(msg['listeners'][LISTENER_ID1]['pools'], {})

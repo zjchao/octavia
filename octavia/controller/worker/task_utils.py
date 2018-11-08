@@ -14,11 +14,12 @@
 
 """ Methods common to the controller work tasks."""
 
-from oslo_log import log as logging
+import logging
 
 from octavia.common import constants
 from octavia.db import api as db_apis
 from octavia.db import repositories as repo
+from octavia.i18n import _LE
 
 LOG = logging.getLogger(__name__)
 
@@ -38,23 +39,6 @@ class TaskUtils(object):
         self.l7rule_repo = repo.L7RuleRepository()
         super(TaskUtils, self).__init__(**kwargs)
 
-    def unmark_amphora_health_busy(self, amphora_id):
-        """Unmark the amphora_health record busy for an amphora.
-
-        NOTE: This should only be called from revert methods.
-
-        :param amphora_id: The amphora id to unmark busy
-        """
-        LOG.debug('Unmarking health monitoring busy on amphora: %s',
-                  amphora_id)
-        try:
-            self.amp_health_repo.update(db_apis.get_session(),
-                                        amphora_id=amphora_id,
-                                        busy=False)
-        except Exception as e:
-            LOG.debug('Failed to update amphora health record %(amp)s '
-                      'due to: %(except)s', {'amp': amphora_id, 'except': e})
-
     def mark_amphora_status_error(self, amphora_id):
         """Sets an amphora status to ERROR.
 
@@ -67,9 +51,9 @@ class TaskUtils(object):
                                      id=amphora_id,
                                      status=constants.ERROR)
         except Exception as e:
-            LOG.error("Failed to update amphora %(amp)s "
-                      "status to ERROR due to: "
-                      "%(except)s", {'amp': amphora_id, 'except': e})
+            LOG.error(_LE("Failed to update amphora %(amp)s "
+                          "status to ERROR due to: "
+                          "%(except)s"), {'amp': amphora_id, 'except': e})
 
     def mark_health_mon_prov_status_error(self, health_mon_id):
         """Sets a health monitor provisioning status to ERROR.
@@ -80,12 +64,13 @@ class TaskUtils(object):
         """
         try:
             self.health_mon_repo.update(db_apis.get_session(),
-                                        id=health_mon_id,
+                                        pool_id=health_mon_id,
                                         provisioning_status=constants.ERROR)
         except Exception as e:
-            LOG.error("Failed to update health monitor %(health)s "
-                      "provisioning status to ERROR due to: "
-                      "%(except)s", {'health': health_mon_id, 'except': e})
+            LOG.error(_LE("Failed to update health monitor %(health)s "
+                          "provisioning status to ERROR due to: "
+                          "%(except)s"), {'health': health_mon_id,
+                                          'except': e})
 
     def mark_l7policy_prov_status_error(self, l7policy_id):
         """Sets a L7 policy provisioning status to ERROR.
@@ -99,9 +84,9 @@ class TaskUtils(object):
                                       id=l7policy_id,
                                       provisioning_status=constants.ERROR)
         except Exception as e:
-            LOG.error("Failed to update l7policy %(l7p)s "
-                      "provisioning status to ERROR due to: "
-                      "%(except)s", {'l7p': l7policy_id, 'except': e})
+            LOG.error(_LE("Failed to update l7policy %(l7p)s "
+                          "provisioning status to ERROR due to: "
+                          "%(except)s"), {'l7p': l7policy_id, 'except': e})
 
     def mark_l7rule_prov_status_error(self, l7rule_id):
         """Sets a L7 rule provisioning status to ERROR.
@@ -115,9 +100,9 @@ class TaskUtils(object):
                                     id=l7rule_id,
                                     provisioning_status=constants.ERROR)
         except Exception as e:
-            LOG.error("Failed to update l7rule %(l7r)s "
-                      "provisioning status to ERROR due to: "
-                      "%(except)s", {'l7r': l7rule_id, 'except': e})
+            LOG.error(_LE("Failed to update l7rule %(l7r)s "
+                          "provisioning status to ERROR due to: "
+                          "%(except)s"), {'l7r': l7rule_id, 'except': e})
 
     def mark_listener_prov_status_error(self, listener_id):
         """Sets a listener provisioning status to ERROR.
@@ -131,9 +116,9 @@ class TaskUtils(object):
                                       id=listener_id,
                                       provisioning_status=constants.ERROR)
         except Exception as e:
-            LOG.error("Failed to update listener %(list)s "
-                      "provisioning status to ERROR due to: "
-                      "%(except)s", {'list': listener_id, 'except': e})
+            LOG.error(_LE("Failed to update listener %(list)s "
+                          "provisioning status to ERROR due to: "
+                          "%(except)s"), {'list': listener_id, 'except': e})
 
     def mark_loadbalancer_prov_status_error(self, loadbalancer_id):
         """Sets a load balancer provisioning status to ERROR.
@@ -148,9 +133,9 @@ class TaskUtils(object):
                                           id=loadbalancer_id,
                                           provisioning_status=constants.ERROR)
         except Exception as e:
-            LOG.error("Failed to update load balancer %(lb)s "
-                      "provisioning status to ERROR due to: "
-                      "%(except)s", {'lb': loadbalancer_id, 'except': e})
+            LOG.error(_LE("Failed to update load balancer %(lb)s "
+                          "provisioning status to ERROR due to: "
+                          "%(except)s"), {'lb': loadbalancer_id, 'except': e})
 
     def mark_listener_prov_status_active(self, listener_id):
         """Sets a listener provisioning status to ACTIVE.
@@ -165,25 +150,9 @@ class TaskUtils(object):
                                       id=listener_id,
                                       provisioning_status=constants.ACTIVE)
         except Exception as e:
-            LOG.error("Failed to update listener %(list)s "
-                      "provisioning status to ACTIVE due to: "
-                      "%(except)s", {'list': listener_id, 'except': e})
-
-    def mark_pool_prov_status_active(self, pool_id):
-        """Sets a pool provisioning status to ACTIVE.
-
-        NOTE: This should only be called from revert methods.
-
-        :param pool_id: Pool ID to set provisioning status to ACTIVE
-        """
-        try:
-            self.pool_repo.update(db_apis.get_session(),
-                                  id=pool_id,
-                                  provisioning_status=constants.ACTIVE)
-        except Exception as e:
-            LOG.error("Failed to update pool %(pool)s provisioning status "
-                      "to ACTIVE due to: %(except)s", {'pool': pool_id,
-                                                       'except': e})
+            LOG.error(_LE("Failed to update listener %(list)s "
+                          "provisioning status to ACTIVE due to: "
+                          "%(except)s"), {'list': listener_id, 'except': e})
 
     def mark_loadbalancer_prov_status_active(self, loadbalancer_id):
         """Sets a load balancer provisioning status to ACTIVE.
@@ -198,9 +167,9 @@ class TaskUtils(object):
                                           id=loadbalancer_id,
                                           provisioning_status=constants.ACTIVE)
         except Exception as e:
-            LOG.error("Failed to update load balancer %(lb)s "
-                      "provisioning status to ACTIVE due to: "
-                      "%(except)s", {'lb': loadbalancer_id, 'except': e})
+            LOG.error(_LE("Failed to update load balancer %(lb)s "
+                          "provisioning status to ACTIVE due to: "
+                          "%(except)s"), {'lb': loadbalancer_id, 'except': e})
 
     def mark_member_prov_status_error(self, member_id):
         """Sets a member provisioning status to ERROR.
@@ -214,9 +183,9 @@ class TaskUtils(object):
                                     id=member_id,
                                     provisioning_status=constants.ERROR)
         except Exception as e:
-            LOG.error("Failed to update member %(member)s "
-                      "provisioning status to ERROR due to: "
-                      "%(except)s", {'member': member_id, 'except': e})
+            LOG.error(_LE("Failed to update member %(member)s "
+                          "provisioning status to ERROR due to: "
+                          "%(except)s"), {'member': member_id, 'except': e})
 
     def mark_pool_prov_status_error(self, pool_id):
         """Sets a pool provisioning status to ERROR.
@@ -230,19 +199,6 @@ class TaskUtils(object):
                                   id=pool_id,
                                   provisioning_status=constants.ERROR)
         except Exception as e:
-            LOG.error("Failed to update pool %(pool)s "
-                      "provisioning status to ERROR due to: "
-                      "%(except)s", {'pool': pool_id, 'except': e})
-
-    def get_current_loadbalancer_from_db(self, loadbalancer_id):
-        """Gets a Loadbalancer from db.
-
-        :param: loadbalancer_id: Load balancer ID which to get from db
-        """
-        try:
-            return self.loadbalancer_repo.get(db_apis.get_session(),
-                                              id=loadbalancer_id)
-        except Exception as e:
-            LOG.error("Failed to get loadbalancer %(loadbalancer)s "
-                      "due to: %(except)s",
-                      {'loadbalancer': loadbalancer_id, 'except': e})
+            LOG.error(_LE("Failed to update pool %(pool)s "
+                          "provisioning status to ERROR due to: "
+                          "%(except)s"), {'pool': pool_id, 'except': e})

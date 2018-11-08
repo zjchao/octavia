@@ -14,18 +14,16 @@ from glanceclient import client as glance_client
 from neutronclient.neutron import client as neutron_client
 from novaclient import api_versions
 from novaclient import client as nova_client
-from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import excutils
 
 from octavia.common import keystone
+from octavia.i18n import _LE
 
 LOG = logging.getLogger(__name__)
-CONF = cfg.CONF
-
 GLANCE_VERSION = '2'
 NEUTRON_VERSION = '2.0'
-NOVA_VERSION = '2.15'
+NOVA_VERSION = '2.1'
 
 
 class NovaAuth(object):
@@ -46,10 +44,9 @@ class NovaAuth(object):
         :return: a Nova Client object.
         :raises Exception: if the client cannot be created
         """
-        ksession = keystone.KeystoneSession()
         if not cls.nova_client:
             kwargs = {'region_name': region,
-                      'session': ksession.get_session(),
+                      'session': keystone.get_session(),
                       'endpoint_type': endpoint_type,
                       'insecure': insecure}
             if service_name:
@@ -63,7 +60,7 @@ class NovaAuth(object):
                     version=api_versions.APIVersion(NOVA_VERSION), **kwargs)
             except Exception:
                 with excutils.save_and_reraise_exception():
-                    LOG.exception("Error creating Nova client.")
+                    LOG.exception(_LE("Error creating Nova client."))
         return cls.nova_client
 
 
@@ -85,10 +82,9 @@ class NeutronAuth(object):
         :return: a Neutron Client object.
         :raises Exception: if the client cannot be created
         """
-        ksession = keystone.KeystoneSession()
         if not cls.neutron_client:
             kwargs = {'region_name': region,
-                      'session': ksession.get_session(),
+                      'session': keystone.get_session(),
                       'endpoint_type': endpoint_type,
                       'insecure': insecure}
             if service_name:
@@ -102,7 +98,7 @@ class NeutronAuth(object):
                     NEUTRON_VERSION, **kwargs)
             except Exception:
                 with excutils.save_and_reraise_exception():
-                    LOG.exception("Error creating Neutron client.")
+                    LOG.exception(_LE("Error creating Neutron client."))
         return cls.neutron_client
 
 
@@ -124,10 +120,9 @@ class GlanceAuth(object):
         :return: a Glance Client object.
         :raises Exception: if the client cannot be created
         """
-        ksession = keystone.KeystoneSession()
         if not cls.glance_client:
             kwargs = {'region_name': region,
-                      'session': ksession.get_session(),
+                      'session': keystone.get_session(),
                       'interface': endpoint_type}
             if service_name:
                 kwargs['service_name'] = service_name
@@ -141,5 +136,5 @@ class GlanceAuth(object):
                     GLANCE_VERSION, **kwargs)
             except Exception:
                 with excutils.save_and_reraise_exception():
-                    LOG.exception("Error creating Glance client.")
+                    LOG.exception(_LE("Error creating Glance client."))
         return cls.glance_client

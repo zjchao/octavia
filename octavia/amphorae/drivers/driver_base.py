@@ -22,34 +22,15 @@ import six
 class AmphoraLoadBalancerDriver(object):
 
     @abc.abstractmethod
-    def update_amphora_listeners(self, listeners, amphora_id, timeout_dict):
-        """Update the amphora with a new configuration.
-
-        :param listeners: List of listeners to update.
-        :type listener: list
-        :param amphora_id: The ID of the amphora to update
-        :type amphora_id: string
-        :param timeout_dict: Dictionary of timeout values for calls to the
-                             amphora. May contain: req_conn_timeout,
-                             req_read_timeout, conn_max_retries,
-                             conn_retry_interval
-        :returns: None
-
-        Builds a new configuration, pushes it to the amphora, and reloads
-        the listener on one amphora.
-        """
-        pass
-
-    @abc.abstractmethod
     def update(self, listener, vip):
         """Update the amphora with a new configuration.
 
         :param listener: listener object,
-                         need to use its protocol_port property
+        need to use its protocol_port property
         :type listener: object
         :param vip: vip object, need to use its ip_address property
         :type vip: object
-        :returns: None
+        :returns: return a value list (listener, vip, status flag--update)
 
         At this moment, we just build the basic structure for testing, will
         add more function along with the development.
@@ -61,7 +42,7 @@ class AmphoraLoadBalancerDriver(object):
         """Stop the listener on the vip.
 
         :param listener: listener object,
-                         need to use its protocol_port property
+        need to use its protocol_port property
         :type listener: object
         :param vip: vip object, need to use its ip_address property
         :type vip: object
@@ -77,9 +58,9 @@ class AmphoraLoadBalancerDriver(object):
         """Start the listener on the vip.
 
         :param listener: listener object,
-                         need to use its protocol_port property
+        need to use its protocol_port property
         :type listener: object
-        :param vip: vip object, need to use its ip_address property
+        :param vip : vip object, need to use its ip_address property
         :type vip: object
         :returns: return a value list (listener, vip, status flag--enable)
 
@@ -93,7 +74,7 @@ class AmphoraLoadBalancerDriver(object):
         """Delete the listener on the vip.
 
         :param listener: listener object,
-                         need to use its protocol_port property
+        need to use its protocol_port property
         :type listener: object
         :param vip: vip object, need to use its ip_address property
         :type vip: object
@@ -128,7 +109,7 @@ class AmphoraLoadBalancerDriver(object):
         :param amphora: amphora object, need to use its id property
         :type amphora: object
         :returns: return a value list (amphora.id, status flag--'ge
-                  t_diagnostics')
+        t_diagnostics')
 
         At this moment, we just build the basic structure for testing, will
         add more function along with the development, eventually, we want it
@@ -300,13 +281,5 @@ class VRRPDriverMixin(object):
         """Reload the VRRP services of all amphorae of the loadbalancer
 
         :param loadbalancer: loadbalancer object
-        """
-        pass
-
-    @abc.abstractmethod
-    def get_vrrp_interface(self, amphora):
-        """Get the VRRP interface object for a specific amphora
-
-        :param amphora: amphora object
         """
         pass

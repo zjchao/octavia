@@ -14,12 +14,12 @@
 #
 
 import concurrent.futures
-
 from oslo_config import cfg
 from taskflow import engines as tf_engines
 
 
 CONF = cfg.CONF
+CONF.import_group('task_flow', 'octavia.common.config')
 
 
 class BaseTaskFlowEngine(object):
@@ -36,9 +36,8 @@ class BaseTaskFlowEngine(object):
     def _taskflow_load(self, flow, **kwargs):
         eng = tf_engines.load(
             flow,
-            engine=CONF.task_flow.engine,
+            engine_conf=CONF.task_flow.engine,
             executor=self.executor,
-            never_resolve=CONF.task_flow.disable_revert,
             **kwargs)
         eng.compile()
         eng.prepare()

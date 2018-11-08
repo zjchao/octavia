@@ -7,11 +7,7 @@ cover/
 covhtml/
 dist/
 doc/build
-doc/source/configuration/_static/octavia.policy.yaml.sample
-doc/source/contributor/devref/erd.svg
-doc/source/contributor/devref/flow_diagrams/
-doc/source/contributor/modules
-api-ref/build
+doc/source/devref/flow_diagrams/
 .idea/*
 *.DS_Store
 *.pyc
@@ -23,15 +19,12 @@ setuptools*.egg/
 subunit.log
 tempest.log
 .testrepository
-.stestr
 .tox/
 .venv/
 *.mo
 *.sw?
 *~
 .eggs/
-.ropeproject/
 
 # Files created by releasenotes build
 releasenotes/build
-api-ref/build

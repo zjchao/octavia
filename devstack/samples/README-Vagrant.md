@@ -34,7 +34,7 @@ Single node deployment
 
     vagrant ssh
 
-4) Continue on the common section below
+4) Continue on the common section bellow
 
 Multinode
 ~~~~~~~~~
@@ -43,7 +43,7 @@ This will create an environment where the octavia services are replicated
 across two nodes, and in front of the octavia api, an haproxy is configured
 to distribute traffic among both API servers, and provide failure tolerance.
 
-Please note that the database is a single mysql instance, with no clustering.
+Please note that the database is a single mysql instance, with no clustering. 
 
 1) Create and deploy the environment VMs
 
@@ -75,7 +75,7 @@ Common to multinode and single node
 1) Determine the loadbalancer IP:
 
     source openrc admin admin
-    openstack loadbalancer show lb1 -f value -c vip_address
+    neutron lbaas-loadbalancer-show lb1 | grep vip_address
 
 2) make HTTP requests to test your load balancer:
 

@@ -34,18 +34,16 @@ class ComputeBase(object):
         :param key_name: Optionally specify a keypair
         :param sec_groups: Optionally specify list of security groups
         :param network_ids: A list of network IDs to attach to the amphora
-        :param config_drive_files: An optional dict of files to overwrite on
-                                   the server upon boot. Keys are file names
-                                   (i.e. /etc/passwd) and values are the
-                                   file contents (either as a string or as
-                                   a file-like object). A maximum of five
-                                   entries is allowed, and each file must be
-                                   10k or less.
+        :param config_drive_files:  An optional dict of files to overwrite on
+        the server upon boot. Keys are file names (i.e. /etc/passwd)
+        and values are the file contents (either as a string or as
+        a file-like object). A maximum of five entries is allowed,
+        and each file must be 10k or less.
         :param user_data: Optional user data to pass to be exposed by the
-                          metadata server this can be a file type object as
-                          well or a string
+        metadata server this can be a file type object as well or
+        a string
         :param server_group_id: Optional server group id(uuid) which is used
-                                for anti_affinity feature
+        for anti_affinity feature
 
         :raises ComputeBuildException: if compute failed to build amphora
         :returns: UUID of amphora
@@ -75,7 +73,6 @@ class ComputeBase(object):
 
         :param compute_id: the id of the desired amphora
         :returns: the amphora object
-        :returns: fault message or None
         """
         pass
 
@@ -94,30 +91,5 @@ class ComputeBase(object):
         """Delete a server group object
 
         :param server_group_id: the uuid of a server group
-        """
-        pass
-
-    @abc.abstractmethod
-    def attach_network_or_port(self, compute_id, network_id=None,
-                               ip_address=None, port_id=None):
-        """Connects an existing amphora to an existing network.
-
-        :param compute_id: id of an amphora in the compute service
-        :param network_id: id of a network
-        :param ip_address: ip address to attempt to be assigned to interface
-        :param port_id: id of the neutron port
-        :return: nova interface
-        :raises: Exception
-        """
-        pass
-
-    @abc.abstractmethod
-    def detach_port(self, compute_id, port_id):
-        """Disconnects an existing amphora from an existing port.
-
-        :param compute_id: id of an amphora in the compute service
-        :param port_id: id of the port
-        :return: None
-        :raises: Exception
         """
         pass

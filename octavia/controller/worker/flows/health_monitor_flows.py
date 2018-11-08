@@ -40,8 +40,6 @@ class HealthMonitorFlows(object):
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
         create_hm_flow.add(database_tasks.MarkHealthMonitorActiveInDB(
             requires=constants.HEALTH_MON))
-        create_hm_flow.add(database_tasks.MarkPoolActiveInDB(
-            requires=constants.POOL))
         create_hm_flow.add(database_tasks.MarkLBAndListenersActiveInDB(
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
 
@@ -65,15 +63,9 @@ class HealthMonitorFlows(object):
         delete_hm_flow.add(amphora_driver_tasks.ListenersUpdate(
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
         delete_hm_flow.add(database_tasks.DeleteHealthMonitorInDB(
+            requires=constants.POOL_ID))
+        delete_hm_flow.add(database_tasks.MarkHealthMonitorActiveInDB(
             requires=constants.HEALTH_MON))
-        delete_hm_flow.add(database_tasks.DecrementHealthMonitorQuota(
-            requires=constants.HEALTH_MON))
-        delete_hm_flow.add(
-            database_tasks.UpdatePoolMembersOperatingStatusInDB(
-                requires=constants.POOL,
-                inject={constants.OPERATING_STATUS: constants.NO_MONITOR}))
-        delete_hm_flow.add(database_tasks.MarkPoolActiveInDB(
-            requires=constants.POOL))
         delete_hm_flow.add(database_tasks.MarkLBAndListenersActiveInDB(
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
 
@@ -91,14 +83,16 @@ class HealthMonitorFlows(object):
                       constants.LOADBALANCER]))
         update_hm_flow.add(database_tasks.MarkHealthMonitorPendingUpdateInDB(
             requires=constants.HEALTH_MON))
+        update_hm_flow.add(model_tasks.
+                           UpdateAttributes(
+                               rebind={constants.OBJECT: constants.HEALTH_MON},
+                               requires=[constants.UPDATE_DICT]))
         update_hm_flow.add(amphora_driver_tasks.ListenersUpdate(
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
         update_hm_flow.add(database_tasks.UpdateHealthMonInDB(
             requires=[constants.HEALTH_MON, constants.UPDATE_DICT]))
         update_hm_flow.add(database_tasks.MarkHealthMonitorActiveInDB(
             requires=constants.HEALTH_MON))
-        update_hm_flow.add(database_tasks.MarkPoolActiveInDB(
-            requires=constants.POOL))
         update_hm_flow.add(database_tasks.MarkLBAndListenersActiveInDB(
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
 

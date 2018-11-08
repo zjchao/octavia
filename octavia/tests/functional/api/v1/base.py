@@ -14,14 +14,11 @@
 
 import mock
 from oslo_config import cfg
-from oslo_config import fixture as oslo_fixture
 from oslo_utils import uuidutils
 import pecan
 import pecan.testing
 
 from octavia.api import config as pconfig
-# needed for tests to function when run independently:
-from octavia.common import config  # noqa: F401
 from octavia.common import constants
 from octavia.db import api as db_api
 from octavia.db import repositories
@@ -31,13 +28,8 @@ from octavia.tests.functional.db import base as base_db_test
 class BaseAPITest(base_db_test.OctaviaDBTestBase):
 
     BASE_PATH = '/v1'
-    QUOTAS_PATH = '/quotas'
-    QUOTA_PATH = QUOTAS_PATH + '/{project_id}'
-    QUOTA_DEFAULT_PATH = QUOTAS_PATH + '/{project_id}/default'
     LBS_PATH = '/loadbalancers'
     LB_PATH = LBS_PATH + '/{lb_id}'
-    LB_DELETE_CASCADE_PATH = LB_PATH + '/delete_cascade'
-    LB_STATS_PATH = LB_PATH + '/stats'
     LISTENERS_PATH = LB_PATH + '/listeners'
     LISTENER_PATH = LISTENERS_PATH + '/{listener_id}'
     LISTENER_STATS_PATH = LISTENER_PATH + '/stats'
@@ -58,25 +50,19 @@ class BaseAPITest(base_db_test.OctaviaDBTestBase):
 
     def setUp(self):
         super(BaseAPITest, self).setUp()
-        conf = self.useFixture(oslo_fixture.Config(cfg.CONF))
-        conf.config(group='api_settings', api_handler='simulated_handler')
-        conf.config(group="controller_worker",
-                    network_driver='network_noop_driver')
-        conf.config(group='api_settings', auth_strategy=constants.NOAUTH)
+        cfg.CONF.set_override('api_handler', 'simulated_handler')
+        cfg.CONF.set_override('network_driver', 'network_noop_driver',
+                              group='controller_worker')
         self.lb_repo = repositories.LoadBalancerRepository()
         self.listener_repo = repositories.ListenerRepository()
         self.listener_stats_repo = repositories.ListenerStatisticsRepository()
         self.pool_repo = repositories.PoolRepository()
         self.member_repo = repositories.MemberRepository()
         self.amphora_repo = repositories.AmphoraRepository()
-        patcher = mock.patch('octavia.api.handlers.controller_simulator.'
+        patcher = mock.patch('octavia.api.v1.handlers.controller_simulator.'
                              'handler.SimulatedControllerHandler')
         self.handler_mock = patcher.start()
-        self.check_quota_met_true_mock = mock.patch(
-            'octavia.db.repositories.Repositories.check_quota_met',
-            return_value=True)
         self.app = self._make_app()
-        self.project_id = uuidutils.generate_uuid()
 
         def reset_pecan():
             patcher.stop()
@@ -85,8 +71,8 @@ class BaseAPITest(base_db_test.OctaviaDBTestBase):
         self.addCleanup(reset_pecan)
 
     def _make_app(self):
-        return pecan.testing.load_test_app(
-            {'app': pconfig.app, 'wsme': pconfig.wsme})
+        return pecan.testing.load_test_app({'app': pconfig.app,
+                                            'wsme': pconfig.wsme})
 
     def _get_full_path(self, path):
         return ''.join([self.BASE_PATH, path])
@@ -131,14 +117,13 @@ class BaseAPITest(base_db_test.OctaviaDBTestBase):
         return response
 
     def create_load_balancer(self, vip, **optionals):
-        req_dict = {'vip': vip, 'project_id': self.project_id}
+        req_dict = {'vip': vip}
         req_dict.update(optionals)
         response = self.post(self.LBS_PATH, req_dict)
         return response.json
 
     def create_listener(self, lb_id, protocol, protocol_port, **optionals):
-        req_dict = {'protocol': protocol, 'protocol_port': protocol_port,
-                    'project_id': self.project_id}
+        req_dict = {'protocol': protocol, 'protocol_port': protocol_port}
         req_dict.update(optionals)
         path = self.LISTENERS_PATH.format(lb_id=lb_id)
         response = self.post(path, req_dict)
@@ -148,8 +133,7 @@ class BaseAPITest(base_db_test.OctaviaDBTestBase):
         db_ls = self.listener_stats_repo.create(
             db_api.get_session(), listener_id=listener_id,
             amphora_id=amphora_id, bytes_in=0,
-            bytes_out=0, active_connections=0, total_connections=0,
-            request_errors=0)
+            bytes_out=0, active_connections=0, total_connections=0)
         return db_ls.to_dict()
 
     def create_amphora(self, amphora_id, loadbalancer_id, **optionals):
@@ -170,8 +154,7 @@ class BaseAPITest(base_db_test.OctaviaDBTestBase):
 
     def create_pool_sans_listener(self, lb_id, protocol, lb_algorithm,
                                   **optionals):
-        req_dict = {'protocol': protocol, 'lb_algorithm': lb_algorithm,
-                    'project_id': self.project_id}
+        req_dict = {'protocol': protocol, 'lb_algorithm': lb_algorithm}
         req_dict.update(optionals)
         path = self.POOLS_PATH.format(lb_id=lb_id)
         response = self.post(path, req_dict)
@@ -179,8 +162,7 @@ class BaseAPITest(base_db_test.OctaviaDBTestBase):
 
     def create_pool(self, lb_id, listener_id, protocol, lb_algorithm,
                     **optionals):
-        req_dict = {'protocol': protocol, 'lb_algorithm': lb_algorithm,
-                    'project_id': self.project_id}
+        req_dict = {'protocol': protocol, 'lb_algorithm': lb_algorithm}
         req_dict.update(optionals)
         path = self.DEPRECATED_POOLS_PATH.format(lb_id=lb_id,
                                                  listener_id=listener_id)
@@ -189,8 +171,7 @@ class BaseAPITest(base_db_test.OctaviaDBTestBase):
 
     def create_member(self, lb_id, pool_id, ip_address,
                       protocol_port, expect_error=False, **optionals):
-        req_dict = {'ip_address': ip_address, 'protocol_port': protocol_port,
-                    'project_id': self.project_id}
+        req_dict = {'ip_address': ip_address, 'protocol_port': protocol_port}
         req_dict.update(optionals)
         path = self.MEMBERS_PATH.format(lb_id=lb_id, pool_id=pool_id)
         response = self.post(path, req_dict, expect_errors=expect_error)
@@ -198,8 +179,7 @@ class BaseAPITest(base_db_test.OctaviaDBTestBase):
 
     def create_member_with_listener(self, lb_id, listener_id, pool_id,
                                     ip_address, protocol_port, **optionals):
-        req_dict = {'ip_address': ip_address, 'protocol_port': protocol_port,
-                    'project_id': self.project_id}
+        req_dict = {'ip_address': ip_address, 'protocol_port': protocol_port}
         req_dict.update(optionals)
         path = self.DEPRECATED_MEMBERS_PATH.format(
             lb_id=lb_id, listener_id=listener_id, pool_id=pool_id)
@@ -213,8 +193,7 @@ class BaseAPITest(base_db_test.OctaviaDBTestBase):
                     'delay': delay,
                     'timeout': timeout,
                     'fall_threshold': fall_threshold,
-                    'rise_threshold': rise_threshold,
-                    'project_id': self.project_id}
+                    'rise_threshold': rise_threshold}
         req_dict.update(optionals)
         path = self.HM_PATH.format(lb_id=lb_id,
                                    pool_id=pool_id)
@@ -228,8 +207,7 @@ class BaseAPITest(base_db_test.OctaviaDBTestBase):
                     'delay': delay,
                     'timeout': timeout,
                     'fall_threshold': fall_threshold,
-                    'rise_threshold': rise_threshold,
-                    'project_id': self.project_id}
+                    'rise_threshold': rise_threshold}
         req_dict.update(optionals)
         path = self.DEPRECATED_HM_PATH.format(
             lb_id=lb_id, listener_id=listener_id, pool_id=pool_id)
@@ -257,8 +235,8 @@ class BaseAPITest(base_db_test.OctaviaDBTestBase):
         self.lb_repo.update(db_api.get_session(), lb_id,
                             provisioning_status=prov_status,
                             operating_status=op_status)
-        lb_listeners, _ = self.listener_repo.get_all(
-            db_api.get_session(), load_balancer_id=lb_id)
+        lb_listeners = self.listener_repo.get_all(db_api.get_session(),
+                                                  load_balancer_id=lb_id)
         for listener in lb_listeners:
             for pool in listener.pools:
                 self.pool_repo.update(db_api.get_session(), pool.id,

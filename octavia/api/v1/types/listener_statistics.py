@@ -14,12 +14,12 @@
 
 from wsme import types as wtypes
 
-from octavia.api.common import types as base
+from octavia.api.v1.types import base
 
 
 class ListenerStatisticsResponse(base.BaseType):
+    """Defines which attributes are to be shown on any response."""
     bytes_in = wtypes.wsattr(wtypes.IntegerType())
     bytes_out = wtypes.wsattr(wtypes.IntegerType())
     active_connections = wtypes.wsattr(wtypes.IntegerType())
     total_connections = wtypes.wsattr(wtypes.IntegerType())
-    request_errors = wtypes.wsattr(wtypes.IntegerType())

@@ -20,6 +20,9 @@ from octavia.common.config import cfg
 from octavia.common import constants
 
 CONF = cfg.CONF
+CONF.import_group('amphora_agent', 'octavia.common.config')
+CONF.import_group('haproxy_amphora', 'octavia.common.config')
+CONF.import_group('health_manager', 'octavia.common.config')
 
 TEMPLATES_DIR = (os.path.dirname(os.path.realpath(__file__)) +
                  constants.AGENT_API_TEMPLATES + '/')
@@ -42,8 +45,6 @@ class AgentJinjaTemplater(object):
                  CONF.amphora_agent.agent_server_network_dir,
              'agent_server_network_file':
                  CONF.amphora_agent.agent_server_network_file,
-             'agent_request_read_timeout':
-                 CONF.amphora_agent.agent_request_read_timeout,
              'amphora_id': amphora_id,
              'base_cert_dir': CONF.haproxy_amphora.base_cert_dir,
              'base_path': CONF.haproxy_amphora.base_path,
@@ -56,5 +57,4 @@ class AgentJinjaTemplater(object):
              'heartbeat_key': CONF.health_manager.heartbeat_key,
              'use_upstart': CONF.haproxy_amphora.use_upstart,
              'respawn_count': CONF.haproxy_amphora.respawn_count,
-             'respawn_interval': CONF.haproxy_amphora.respawn_interval,
-             'amphora_udp_driver': CONF.amphora_agent.amphora_udp_driver})
+             'respawn_interval': CONF.haproxy_amphora.respawn_interval})

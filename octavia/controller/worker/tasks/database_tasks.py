@@ -13,12 +13,11 @@
 # under the License.
 #
 
+import logging
+
 from oslo_config import cfg
 from oslo_db import exception as odb_exceptions
-from oslo_log import log as logging
-from oslo_utils import excutils
 from oslo_utils import uuidutils
-import six
 import sqlalchemy
 from sqlalchemy.orm import exc
 from taskflow import task
@@ -30,9 +29,11 @@ import octavia.common.tls_utils.cert_parser as cert_parser
 from octavia.controller.worker import task_utils as task_utilities
 from octavia.db import api as db_apis
 from octavia.db import repositories as repo
+from octavia.i18n import _LE, _LI, _LW
 
 CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
+CONF.import_group('keepalived_vrrp', 'octavia.common.config')
 
 
 class BaseDatabaseTask(task.Task):
@@ -44,7 +45,6 @@ class BaseDatabaseTask(task.Task):
         self.health_mon_repo = repo.HealthMonitorRepository()
         self.listener_repo = repo.ListenerRepository()
         self.loadbalancer_repo = repo.LoadBalancerRepository()
-        self.vip_repo = repo.VipRepository()
         self.member_repo = repo.MemberRepository()
         self.pool_repo = repo.PoolRepository()
         self.amp_health_repo = repo.AmphoraHealthRepository()
@@ -97,7 +97,7 @@ class CreateAmphoraInDB(BaseDatabaseTask):
                                            status=constants.PENDING_CREATE,
                                            cert_busy=False)
 
-        LOG.info("Created Amphora in DB with id %s", amphora.id)
+        LOG.info(_LI("Created Amphora in DB with id %s"), amphora.id)
         return amphora.id
 
     def revert(self, result, *args, **kwargs):
@@ -119,15 +119,17 @@ class CreateAmphoraInDB(BaseDatabaseTask):
         # executed after this failed so we will need to do something and
         # result is the amphora's id
 
-        LOG.warning("Reverting create amphora in DB for amp id %s ", result)
+        LOG.warning(_LW("Reverting create amphora in DB for amp id %s "),
+                    result)
 
         # Delete the amphora for now. May want to just update status later
         try:
             self.amphora_repo.delete(db_apis.get_session(), id=result)
         except Exception as e:
-            LOG.error("Failed to delete amphora %(amp)s "
-                      "in the database due to: "
-                      "%(except)s", {'amp': result, 'except': e})
+            LOG.error(_LE("Failed to delete amphora %(amp)s "
+                          "in the database due to: "
+                          "%(except)s"), {'amp': result,
+                                          'except': e})
 
 
 class MarkLBAmphoraeDeletedInDB(BaseDatabaseTask):
@@ -152,32 +154,32 @@ class DeleteHealthMonitorInDB(BaseDatabaseTask):
     Since sqlalchemy will likely retry by itself always revert if it fails
     """
 
-    def execute(self, health_mon):
+    def execute(self, pool_id):
         """Delete the health monitor in DB
 
-        :param health_mon: The health monitor which should be deleted
+        :param pool_id: The id of pool which health monitor should be deleted
         :returns: None
         """
 
-        LOG.debug("DB delete health monitor: %s ", health_mon.id)
+        LOG.debug("DB delete health monitor for pool id: %s ", pool_id)
         try:
-            self.health_mon_repo.delete(db_apis.get_session(),
-                                        id=health_mon.id)
+            self.health_mon_repo.delete(db_apis.get_session(), pool_id=pool_id)
         except exc.NoResultFound:
             # ignore if the HealthMonitor was not found
             pass
 
-    def revert(self, health_mon, *args, **kwargs):
+    def revert(self, pool_id, *args, **kwargs):
         """Mark the health monitor ERROR since the mark active couldn't happen
 
-        :param health_mon: The health monitor which couldn't be deleted
+        :param pool_id: Id of a pool which health monitor couldn't be deleted
         :returns: None
         """
 
-        LOG.warning("Reverting mark health monitor delete in DB "
-                    "for health monitor with id %s", health_mon.id)
-        self.health_mon_repo.update(db_apis.get_session(), id=health_mon.id,
-                                    provisioning_status=constants.ERROR)
+        LOG.warning(_LW("Reverting mark health monitor delete in DB "
+                        "for health monitor on pool with id %s"), pool_id)
+# TODO(johnsom) fix this
+#        self.health_mon_repo.update(db_apis.get_session(), health_mon.id,
+#                                    provisioning_status=constants.ERROR)
 
 
 class DeleteHealthMonitorInDBByPool(DeleteHealthMonitorInDB):
@@ -192,8 +194,7 @@ class DeleteHealthMonitorInDBByPool(DeleteHealthMonitorInDB):
         :param pool: A pool which health monitor should be deleted.
         :returns: None
         """
-        super(DeleteHealthMonitorInDBByPool, self).execute(
-            pool.health_monitor)
+        super(DeleteHealthMonitorInDBByPool, self).execute(pool.id)
 
     def revert(self, pool, *args, **kwargs):
         """Mark the health monitor ERROR since the mark active couldn't happen
@@ -202,7 +203,7 @@ class DeleteHealthMonitorInDBByPool(DeleteHealthMonitorInDB):
         :returns: None
         """
         super(DeleteHealthMonitorInDBByPool, self).revert(
-            pool.health_monitor, *args, **kwargs)
+            pool.id, *args, **kwargs)
 
 
 class DeleteMemberInDB(BaseDatabaseTask):
@@ -228,14 +229,11 @@ class DeleteMemberInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting delete in DB for member id %s", member.id)
-        try:
-            self.member_repo.update(db_apis.get_session(), member.id,
-                                    provisioning_status=constants.ERROR)
-        except Exception as e:
-            LOG.error("Failed to update member %(mem)s "
-                      "provisioning_status to ERROR due to: %(except)s",
-                      {'mem': member.id, 'except': e})
+        LOG.warning(_LW("Reverting delete in DB "
+                        "for member id %s"), member.id)
+# TODO(johnsom) fix this
+#        self.member_repo.update(db_apis.get_session(), member.id,
+#                                operating_status=constants.ERROR)
 
 
 class DeleteListenerInDB(BaseDatabaseTask):
@@ -257,8 +255,8 @@ class DeleteListenerInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark listener delete in DB for listener id %s",
-                    listener.id)
+        LOG.warning(_LW("Reverting mark listener delete in DB "
+                        "for listener id %s"), listener.id)
 
 
 class DeletePoolInDB(BaseDatabaseTask):
@@ -284,14 +282,11 @@ class DeletePoolInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting delete in DB for pool id %s", pool.id)
-        try:
-            self.pool_repo.update(db_apis.get_session(), pool.id,
-                                  provisioning_status=constants.ERROR)
-        except Exception as e:
-            LOG.error("Failed to update pool %(pool)s "
-                      "provisioning_status to ERROR due to: %(except)s",
-                      {'pool': pool.id, 'except': e})
+        LOG.warning(_LW("Reverting delete in DB "
+                        "for pool id %s"), pool.id)
+# TODO(johnsom) Fix this
+#        self.pool_repo.update(db_apis.get_session(), pool.id,
+#                              operating_status=constants.ERROR)
 
 
 class DeleteL7PolicyInDB(BaseDatabaseTask):
@@ -317,14 +312,11 @@ class DeleteL7PolicyInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting delete in DB for l7policy id %s", l7policy.id)
-        try:
-            self.l7policy_repo.update(db_apis.get_session(), l7policy.id,
-                                      provisioning_status=constants.ERROR)
-        except Exception as e:
-            LOG.error("Failed to update l7policy %(l7policy)s "
-                      "provisioning_status to ERROR due to: %(except)s",
-                      {'l7policy': l7policy.id, 'except': e})
+        LOG.warning(_LW("Reverting delete in DB "
+                        "for l7policy id %s"), l7policy.id)
+# TODO(sbalukoff) Fix this
+#        self.listener_repo.update(db_apis.get_session(), l7policy.listener.id,
+#                                  operating_status=constants.ERROR)
 
 
 class DeleteL7RuleInDB(BaseDatabaseTask):
@@ -350,14 +342,12 @@ class DeleteL7RuleInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting delete in DB for l7rule id %s", l7rule.id)
-        try:
-            self.l7rule_repo.update(db_apis.get_session(), l7rule.id,
-                                    provisioning_status=constants.ERROR)
-        except Exception as e:
-            LOG.error("Failed to update l7rule %(l7rule)s "
-                      "provisioning_status to ERROR due to: %(except)s",
-                      {'l7rule': l7rule.id, 'except': e})
+        LOG.warning(_LW("Reverting delete in DB "
+                        "for l7rule id %s"), l7rule.id)
+# TODO(sbalukoff) Fix this
+#        self.listener_repo.update(db_apis.get_session(),
+#                                  l7rule.l7policy.listener.id,
+#                                  operating_status=constants.ERROR)
 
 
 class ReloadAmphora(BaseDatabaseTask):
@@ -471,15 +461,16 @@ class AssociateFailoverAmphoraWithLBID(BaseDatabaseTask):
             self.repos.amphora.update(db_apis.get_session(), amphora_id,
                                       loadbalancer_id=None)
         except Exception as e:
-            LOG.error("Failed to update amphora %(amp)s "
-                      "load balancer id to None due to: "
-                      "%(except)s", {'amp': amphora_id, 'except': e})
+            LOG.error(_LE("Failed to update amphora %(amp)s "
+                          "load balancer id to None due to: "
+                          "%(except)s"), {'amp': amphora_id,
+                                          'except': e})
 
 
 class MapLoadbalancerToAmphora(BaseDatabaseTask):
     """Maps and assigns a load balancer to an amphora in the database."""
 
-    def execute(self, loadbalancer_id, server_group_id=None):
+    def execute(self, loadbalancer_id):
         """Allocates an Amphora for the load balancer in the database.
 
         :param loadbalancer_id: The load balancer id to map to an amphora
@@ -489,11 +480,6 @@ class MapLoadbalancerToAmphora(BaseDatabaseTask):
 
         LOG.debug("Allocating an Amphora for load balancer with id %s",
                   loadbalancer_id)
-
-        if server_group_id is not None:
-            LOG.debug("Load balancer is using anti-affinity. Skipping spares "
-                      "pool allocation.")
-            return None
 
         amp = self.amphora_repo.allocate_and_associate(
             db_apis.get_session(),
@@ -509,8 +495,8 @@ class MapLoadbalancerToAmphora(BaseDatabaseTask):
         return amp.id
 
     def revert(self, result, loadbalancer_id, *args, **kwargs):
-        LOG.warning("Reverting Amphora allocation for the load "
-                    "balancer %s in the database.", loadbalancer_id)
+        LOG.warning(_LW("Reverting Amphora allocation for the load "
+                        "balancer %s in the database."), loadbalancer_id)
         self.task_utils.mark_loadbalancer_prov_status_error(loadbalancer_id)
 
 
@@ -543,16 +529,18 @@ class _MarkAmphoraRoleAndPriorityInDB(BaseDatabaseTask):
         if isinstance(result, failure.Failure):
             return
 
-        LOG.warning("Reverting amphora role in DB for amp id %(amp)s",
+        LOG.warning(_LW("Reverting amphora role in DB for amp "
+                        "id %(amp)s"),
                     {'amp': amphora.id})
         try:
             self.amphora_repo.update(db_apis.get_session(), amphora.id,
                                      role=None,
                                      vrrp_priority=None)
         except Exception as e:
-            LOG.error("Failed to update amphora %(amp)s "
-                      "role and vrrp_priority to None due to: "
-                      "%(except)s", {'amp': amphora.id, 'except': e})
+            LOG.error(_LE("Failed to update amphora %(amp)s "
+                          "role and vrrp_priority to None due to: "
+                          "%(except)s"), {'amp': amphora.id,
+                                          'except': e})
 
 
 class MarkAmphoraMasterInDB(_MarkAmphoraRoleAndPriorityInDB):
@@ -634,13 +622,10 @@ class MarkAmphoraAllocatedInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.info('Mark ALLOCATED in DB for amphora: %(amp)s with '
-                 'compute id %(comp)s for load balancer: %(lb)s',
-                 {
-                     'amp': amphora.id,
-                     'comp': amphora.compute_id,
-                     'lb': loadbalancer_id
-                 })
+        LOG.info(_LI("Mark ALLOCATED in DB for amphora: %(amp)s with "
+                     "compute id %(comp)s for load balancer: %(lb)s"),
+                 {"amp": amphora.id, "comp": amphora.compute_id,
+                  "lb": loadbalancer_id})
         self.amphora_repo.update(db_apis.get_session(), amphora.id,
                                  status=constants.AMPHORA_ALLOCATED,
                                  compute_id=amphora.compute_id,
@@ -660,8 +645,8 @@ class MarkAmphoraAllocatedInDB(BaseDatabaseTask):
         if isinstance(result, failure.Failure):
             return
 
-        LOG.warning("Reverting mark amphora ready in DB for amp "
-                    "id %(amp)s and compute id %(comp)s",
+        LOG.warning(_LW("Reverting mark amphora ready in DB for amp "
+                        "id %(amp)s and compute id %(comp)s"),
                     {'amp': amphora.id, 'comp': amphora.compute_id})
         self.task_utils.mark_amphora_status_error(amphora.id)
 
@@ -695,17 +680,18 @@ class MarkAmphoraBootingInDB(BaseDatabaseTask):
         if isinstance(result, failure.Failure):
             return
 
-        LOG.warning("Reverting mark amphora booting in DB for amp "
-                    "id %(amp)s and compute id %(comp)s",
+        LOG.warning(_LW("Reverting mark amphora booting in DB for amp "
+                        "id %(amp)s and compute id %(comp)s"),
                     {'amp': amphora_id, 'comp': compute_id})
         try:
             self.amphora_repo.update(db_apis.get_session(), amphora_id,
                                      status=constants.ERROR,
                                      compute_id=compute_id)
         except Exception as e:
-            LOG.error("Failed to update amphora %(amp)s "
-                      "status to ERROR due to: "
-                      "%(except)s", {'amp': amphora_id, 'except': e})
+            LOG.error(_LE("Failed to update amphora %(amp)s "
+                          "status to ERROR due to: "
+                          "%(except)s"), {'amp': amphora_id,
+                                          'except': e})
 
 
 class MarkAmphoraDeletedInDB(BaseDatabaseTask):
@@ -734,8 +720,8 @@ class MarkAmphoraDeletedInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark amphora deleted in DB "
-                    "for amp id %(amp)s and compute id %(comp)s",
+        LOG.warning(_LW("Reverting mark amphora deleted in DB "
+                        "for amp id %(amp)s and compute id %(comp)s"),
                     {'amp': amphora.id, 'comp': amphora.compute_id})
         self.task_utils.mark_amphora_status_error(amphora.id)
 
@@ -766,8 +752,8 @@ class MarkAmphoraPendingDeleteInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark amphora pending delete in DB "
-                    "for amp id %(amp)s and compute id %(comp)s",
+        LOG.warning(_LW("Reverting mark amphora pending delete in DB "
+                        "for amp id %(amp)s and compute id %(comp)s"),
                     {'amp': amphora.id, 'comp': amphora.compute_id})
         self.task_utils.mark_amphora_status_error(amphora.id)
 
@@ -798,8 +784,8 @@ class MarkAmphoraPendingUpdateInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark amphora pending update in DB "
-                    "for amp id %(amp)s and compute id %(comp)s",
+        LOG.warning(_LW("Reverting mark amphora pending update in DB "
+                        "for amp id %(amp)s and compute id %(comp)s"),
                     {'amp': amphora.id, 'comp': amphora.compute_id})
         self.task_utils.mark_amphora_status_error(amphora.id)
 
@@ -818,8 +804,8 @@ class MarkAmphoraReadyInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.info("Mark READY in DB for amphora: %(amp)s with compute "
-                 "id %(comp)s",
+        LOG.info(_LI("Mark READY in DB for amphora: %(amp)s with compute "
+                     "id %(comp)s"),
                  {"amp": amphora.id, "comp": amphora.compute_id})
         self.amphora_repo.update(db_apis.get_session(), amphora.id,
                                  status=constants.AMPHORA_READY,
@@ -833,8 +819,8 @@ class MarkAmphoraReadyInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark amphora ready in DB for amp "
-                    "id %(amp)s and compute id %(comp)s",
+        LOG.warning(_LW("Reverting mark amphora ready in DB for amp "
+                        "id %(amp)s and compute id %(comp)s"),
                     {'amp': amphora.id, 'comp': amphora.compute_id})
         try:
             self.amphora_repo.update(db_apis.get_session(), amphora.id,
@@ -842,9 +828,10 @@ class MarkAmphoraReadyInDB(BaseDatabaseTask):
                                      compute_id=amphora.compute_id,
                                      lb_network_ip=amphora.lb_network_ip)
         except Exception as e:
-            LOG.error("Failed to update amphora %(amp)s "
-                      "status to ERROR due to: "
-                      "%(except)s", {'amp': amphora.id, 'except': e})
+            LOG.error(_LE("Failed to update amphora %(amp)s "
+                          "status to ERROR due to: "
+                          "%(except)s"), {'amp': amphora.id,
+                                          'except': e})
 
 
 class UpdateAmphoraComputeId(BaseDatabaseTask):
@@ -872,11 +859,8 @@ class UpdateAmphoraInfo(BaseDatabaseTask):
         :param compute_obj: Compute on which an amphora resides
         :returns: Updated amphora object
         """
-        self.amphora_repo.update(
-            db_apis.get_session(), amphora_id,
-            lb_network_ip=compute_obj.lb_network_ip,
-            cached_zone=compute_obj.cached_zone,
-            image_id=compute_obj.image_id)
+        self.amphora_repo.update(db_apis.get_session(), amphora_id,
+                                 lb_network_ip=compute_obj.lb_network_ip)
         return self.amphora_repo.get(db_apis.get_session(), id=amphora_id)
 
 
@@ -920,110 +904,58 @@ class MarkLBActiveInDB(BaseDatabaseTask):
     Since sqlalchemy will likely retry by itself always revert if it fails
     """
 
-    def __init__(self, mark_subobjects=False, **kwargs):
+    def __init__(self, mark_listeners=False, **kwargs):
         super(MarkLBActiveInDB, self).__init__(**kwargs)
-        self.mark_subobjects = mark_subobjects
+        self.mark_listeners = mark_listeners
 
     def execute(self, loadbalancer):
         """Mark the load balancer as active in DB.
 
-        This also marks ACTIVE all sub-objects of the load balancer if
-        self.mark_subobjects is True.
+        This also marks ACTIVE all listeners of the load balancer if
+        self.mark_listeners is True.
 
         :param loadbalancer: Load balancer object to be updated
         :returns: None
         """
 
-        if self.mark_subobjects:
+        if self.mark_listeners:
             LOG.debug("Marking all listeners of loadbalancer %s ACTIVE",
                       loadbalancer.id)
             for listener in loadbalancer.listeners:
-                self._mark_listener_status(listener, constants.ACTIVE)
+                self.listener_repo.update(db_apis.get_session(),
+                                          listener.id,
+                                          provisioning_status=constants.ACTIVE)
 
-        LOG.info("Mark ACTIVE in DB for load balancer id: %s",
+        LOG.info(_LI("Mark ACTIVE in DB for load balancer id: %s"),
                  loadbalancer.id)
         self.loadbalancer_repo.update(db_apis.get_session(),
                                       loadbalancer.id,
                                       provisioning_status=constants.ACTIVE)
 
-    def _mark_listener_status(self, listener, status):
-        self.listener_repo.update(db_apis.get_session(),
-                                  listener.id,
-                                  provisioning_status=status)
-        LOG.debug("Marking all l7policies of listener %s %s",
-                  listener.id, status)
-        for l7policy in listener.l7policies:
-            self._mark_l7policy_status(l7policy, status)
-
-        if listener.default_pool:
-            LOG.debug("Marking default pool of listener %s %s",
-                      listener.id, status)
-            self._mark_pool_status(listener.default_pool, status)
-
-    def _mark_l7policy_status(self, l7policy, status):
-        self.l7policy_repo.update(
-            db_apis.get_session(), l7policy.id,
-            provisioning_status=status)
-
-        LOG.debug("Marking all l7rules of l7policy %s %s",
-                  l7policy.id, status)
-        for l7rule in l7policy.l7rules:
-            self._mark_l7rule_status(l7rule, status)
-
-        if l7policy.redirect_pool:
-            LOG.debug("Marking redirect pool of l7policy %s %s",
-                      l7policy.id, status)
-            self._mark_pool_status(l7policy.redirect_pool, status)
-
-    def _mark_l7rule_status(self, l7rule, status):
-        self.l7rule_repo.update(
-            db_apis.get_session(), l7rule.id,
-            provisioning_status=status)
-
-    def _mark_pool_status(self, pool, status):
-        self.pool_repo.update(
-            db_apis.get_session(), pool.id,
-            provisioning_status=status)
-        if pool.health_monitor:
-            LOG.debug("Marking health monitor of pool %s %s", pool.id, status)
-            self._mark_hm_status(pool.health_monitor, status)
-
-        LOG.debug("Marking all members of pool %s %s", pool.id, status)
-        for member in pool.members:
-            self._mark_member_status(member, status)
-
-    def _mark_hm_status(self, hm, status):
-        self.health_mon_repo.update(
-            db_apis.get_session(), hm.id,
-            provisioning_status=status)
-
-    def _mark_member_status(self, member, status):
-        self.member_repo.update(
-            db_apis.get_session(), member.id,
-            provisioning_status=status)
-
     def revert(self, loadbalancer, *args, **kwargs):
         """Mark the load balancer as broken and ready to be cleaned up.
 
-        This also puts all sub-objects of the load balancer to ERROR state if
-        self.mark_subobjects is True
+        This also puts all listeners of the load balancer to ERROR state if
+        self.mark_listeners is True
 
         :param loadbalancer: Load balancer object that failed to update
         :returns: None
         """
 
-        if self.mark_subobjects:
+        if self.mark_listeners:
             LOG.debug("Marking all listeners of loadbalancer %s ERROR",
                       loadbalancer.id)
             for listener in loadbalancer.listeners:
                 try:
-                    self._mark_listener_status(listener, constants.ERROR)
+                    self.listener_repo.update(
+                        db_apis.get_session(), listener.id,
+                        provisioning_status=constants.ERROR)
                 except Exception:
-                    LOG.warning("Error updating listener %s provisioning "
-                                "status", listener.id)
+                    LOG.warning(_LW("Error updating listener %s provisioning "
+                                    "status"), listener.id)
 
-        LOG.warning("Reverting mark load balancer deleted in DB "
-                    "for load balancer id %s", loadbalancer.id)
+        LOG.warning(_LW("Reverting mark load balancer deleted in DB "
+                        "for load balancer id %s"), loadbalancer.id)
         self.task_utils.mark_loadbalancer_prov_status_error(loadbalancer.id)
 
 
@@ -1053,17 +985,18 @@ class UpdateLBServerGroupInDB(BaseDatabaseTask):
                associated with the load balancer
         :returns: None
         """
-        LOG.warning('Reverting Server Group updated with id: %(s1)s for '
-                    'load balancer id: %(s2)s ',
+        LOG.warning(_LW('Reverting Server Group updated with id: %(s1)s for '
+                        'load balancer id: %(s2)s '),
                     {'s1': server_group_id, 's2': loadbalancer_id})
         try:
             self.loadbalancer_repo.update(db_apis.get_session(),
                                           id=loadbalancer_id,
                                           server_group_id=None)
         except Exception as e:
-            LOG.error("Failed to update load balancer %(lb)s "
-                      "server_group_id to None due to: "
-                      "%(except)s", {'lb': loadbalancer_id, 'except': e})
+            LOG.error(_LE("Failed to update load balancer %(lb)s "
+                          "server_group_id to None due to: "
+                          "%(except)s"), {'lb': loadbalancer_id,
+                                          'except': e})
 
 
 class MarkLBDeletedInDB(BaseDatabaseTask):
@@ -1092,8 +1025,8 @@ class MarkLBDeletedInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark load balancer deleted in DB "
-                    "for load balancer id %s", loadbalancer.id)
+        LOG.warning(_LW("Reverting mark load balancer deleted in DB "
+                        "for load balancer id %s"), loadbalancer.id)
         self.task_utils.mark_loadbalancer_prov_status_error(loadbalancer.id)
 
 
@@ -1124,8 +1057,8 @@ class MarkLBPendingDeleteInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark load balancer pending delete in DB "
-                    "for load balancer id %s", loadbalancer.id)
+        LOG.warning(_LW("Reverting mark load balancer pending delete in DB "
+                        "for load balancer id %s"), loadbalancer.id)
         self.task_utils.mark_loadbalancer_prov_status_error(loadbalancer.id)
 
 
@@ -1161,8 +1094,10 @@ class MarkLBAndListenersActiveInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark load balancer and listeners active in DB "
-                    "for load balancer id %(LB)s and listener ids: %(list)s",
+        LOG.warning(_LW("Reverting mark load balancer "
+                        "and listeners active in DB "
+                        "for load balancer id %(LB)s and "
+                        "listener ids: %(list)s"),
                     {'LB': loadbalancer.id,
                      'list': ', '.join([l.id for l in listeners])})
         self.task_utils.mark_loadbalancer_prov_status_error(loadbalancer.id)
@@ -1194,8 +1129,8 @@ class MarkListenerActiveInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark listener active in DB "
-                    "for listener id %s", listener.id)
+        LOG.warning(_LW("Reverting mark listener active in DB "
+                        "for listener id %s"), listener.id)
         self.task_utils.mark_listener_prov_status_error(listener.id)
 
 
@@ -1223,8 +1158,8 @@ class MarkListenerDeletedInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark listener deleted in DB "
-                    "for listener id %s", listener.id)
+        LOG.warning(_LW("Reverting mark listener deleted in DB "
+                        "for listener id %s"), listener.id)
         self.task_utils.mark_listener_prov_status_error(listener.id)
 
 
@@ -1253,8 +1188,8 @@ class MarkListenerPendingDeleteInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark listener pending delete in DB "
-                    "for listener id %s", listener.id)
+        LOG.warning(_LW("Reverting mark listener pending delete in DB "
+                        "for listener id %s"), listener.id)
         self.task_utils.mark_listener_prov_status_error(listener.id)
 
 
@@ -1273,11 +1208,6 @@ class UpdateLoadbalancerInDB(BaseDatabaseTask):
         """
 
         LOG.debug("Update DB for loadbalancer id: %s ", loadbalancer.id)
-        if update_dict.get('vip'):
-            vip_dict = update_dict.pop('vip')
-            self.vip_repo.update(db_apis.get_session(),
-                                 loadbalancer.vip.load_balancer_id,
-                                 **vip_dict)
         self.loadbalancer_repo.update(db_apis.get_session(), loadbalancer.id,
                                       **update_dict)
 
@@ -1288,8 +1218,8 @@ class UpdateLoadbalancerInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting update loadbalancer in DB "
-                    "for loadbalancer id %s", loadbalancer.id)
+        LOG.warning(_LW("Reverting update loadbalancer in DB "
+                        "for loadbalancer id %s"), loadbalancer.id)
 
         self.task_utils.mark_loadbalancer_prov_status_error(loadbalancer.id)
 
@@ -1308,8 +1238,8 @@ class UpdateHealthMonInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.debug("Update DB for health monitor id: %s ", health_mon.id)
-        self.health_mon_repo.update(db_apis.get_session(), health_mon.id,
+        LOG.debug("Update DB for health monitor id: %s ", health_mon.pool_id)
+        self.health_mon_repo.update(db_apis.get_session(), health_mon.pool_id,
                                     **update_dict)
 
     def revert(self, health_mon, *args, **kwargs):
@@ -1319,16 +1249,18 @@ class UpdateHealthMonInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting update health monitor in DB "
-                    "for health monitor id %s", health_mon.id)
+        LOG.warning(_LW("Reverting update health monitor in DB "
+                        "for health monitor id %s"), health_mon.pool_id)
+# TODO(johnsom) fix this to set the upper ojects to ERROR
         try:
             self.health_mon_repo.update(db_apis.get_session(),
-                                        health_mon.id,
-                                        provisioning_status=constants.ERROR)
+                                        health_mon.pool_id,
+                                        enabled=0)
         except Exception as e:
-            LOG.error("Failed to update health monitor %(hm)s "
-                      "provisioning_status to ERROR due to: %(except)s",
-                      {'hm': health_mon.id, 'except': e})
+            LOG.error(_LE("Failed to update health monitor %(hm)s "
+                          "enabled to 0 due to: "
+                          "%(except)s"), {'hm': health_mon.pool_id,
+                                          'except': e})
 
 
 class UpdateListenerInDB(BaseDatabaseTask):
@@ -1356,8 +1288,8 @@ class UpdateListenerInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting update listener in DB "
-                    "for listener id %s", listener.id)
+        LOG.warning(_LW("Reverting update listener in DB "
+                        "for listener id %s"), listener.id)
         self.task_utils.mark_listener_prov_status_error(listener.id)
 
 
@@ -1386,15 +1318,17 @@ class UpdateMemberInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting update member in DB "
-                    "for member id %s", member.id)
+        LOG.warning(_LW("Reverting update member in DB "
+                        "for member id %s"), member.id)
+# TODO(johnsom) fix this to set the upper objects to ERROR
         try:
             self.member_repo.update(db_apis.get_session(), member.id,
-                                    provisioning_status=constants.ERROR)
+                                    enabled=0)
         except Exception as e:
-            LOG.error("Failed to update member %(member)s provisioning_status "
-                      "to ERROR due to: %(except)s", {'member': member.id,
-                                                      'except': e})
+            LOG.error(_LE("Failed to update member %(member)s "
+                          "enabled to 0 due to: "
+                          "%(except)s"), {'member': member.id,
+                                          'except': e})
 
 
 class UpdatePoolInDB(BaseDatabaseTask):
@@ -1422,15 +1356,17 @@ class UpdatePoolInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting update pool in DB for pool id %s", pool.id)
+        LOG.warning(_LW("Reverting update pool in DB "
+                        "for pool id %s"), pool.id)
+# TODO(johnsom) fix this to set the upper objects to ERROR
         try:
-            self.repos.update_pool_and_sp(
-                db_apis.get_session(), pool.id,
-                dict(provisioning_status=constants.ERROR))
+            self.repos.update_pool_and_sp(db_apis.get_session(),
+                                          pool.id, enabled=0)
         except Exception as e:
-            LOG.error("Failed to update pool %(pool)s provisioning_status to "
-                      "ERROR due to: %(except)s", {'pool': pool.id,
-                                                   'except': e})
+            LOG.error(_LE("Failed to update pool %(pool)s "
+                          "enabled 0 due to: "
+                          "%(except)s"), {'pool': pool.id,
+                                          'except': e})
 
 
 class UpdateL7PolicyInDB(BaseDatabaseTask):
@@ -1458,15 +1394,17 @@ class UpdateL7PolicyInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting update l7policy in DB "
-                    "for l7policy id %s", l7policy.id)
+        LOG.warning(_LW("Reverting update l7policy in DB "
+                        "for l7policy id %s"), l7policy.id)
+# TODO(sbalukoff) fix this to set the upper objects to ERROR
         try:
             self.l7policy_repo.update(db_apis.get_session(), l7policy.id,
-                                      provisioning_status=constants.ERROR)
+                                      enabled=0)
         except Exception as e:
-            LOG.error("Failed to update l7policy %(l7p)s provisioning_status "
-                      "to ERROR due to: %(except)s", {'l7p': l7policy.id,
-                                                      'except': e})
+            LOG.error(_LE("Failed to update l7policy %(l7p)s "
+                          "enabled to 0 due to: "
+                          "%(except)s"), {'l7p': l7policy.id,
+                                          'except': e})
 
 
 class UpdateL7RuleInDB(BaseDatabaseTask):
@@ -1494,16 +1432,18 @@ class UpdateL7RuleInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting update l7rule in DB "
-                    "for l7rule id %s", l7rule.id)
+        LOG.warning(_LW("Reverting update l7rule in DB "
+                        "for l7rule id %s"), l7rule.id)
+# TODO(sbalukoff) fix this to set appropriate upper objects to ERROR
         try:
             self.l7policy_repo.update(db_apis.get_session(),
                                       l7rule.l7policy.id,
-                                      provisioning_status=constants.ERROR)
+                                      enabled=0)
         except Exception as e:
-            LOG.error("Failed to update L7rule %(l7r)s provisioning_status to "
-                      "ERROR due to: %(except)s", {'l7r': l7rule.l7policy.id,
-                                                   'except': e})
+            LOG.error(_LE("Failed to update L7rule %(l7r)s "
+                          "enabled to 0 due to: "
+                          "%(except)s"), {'l7r': l7rule.l7policy.id,
+                                          'except': e})
 
 
 class GetAmphoraDetails(BaseDatabaseTask):
@@ -1525,25 +1465,6 @@ class GetAmphoraDetails(BaseDatabaseTask):
                                    vrrp_priority=amphora.vrrp_priority)
 
 
-class GetAmphoraeFromLoadbalancer(BaseDatabaseTask):
-    """Task to pull the listeners from a loadbalancer."""
-
-    def execute(self, loadbalancer):
-        """Pull the amphorae from a loadbalancer.
-
-        :param loadbalancer: Load balancer which listeners are required
-        :returns: A list of Listener objects
-        """
-        amphorae = []
-        for amp in loadbalancer.amphorae:
-            a = self.amphora_repo.get(db_apis.get_session(), id=amp.id,
-                                      show_deleted=False)
-            if a is None:
-                continue
-            amphorae.append(a)
-        return amphorae
-
-
 class GetListenersFromLoadbalancer(BaseDatabaseTask):
     """Task to pull the listeners from a loadbalancer."""
 
@@ -1556,7 +1477,6 @@ class GetListenersFromLoadbalancer(BaseDatabaseTask):
         listeners = []
         for listener in loadbalancer.listeners:
             l = self.listener_repo.get(db_apis.get_session(), id=listener.id)
-            l.load_balancer = loadbalancer
             listeners.append(l)
         return listeners
 
@@ -1677,14 +1597,10 @@ class MarkHealthMonitorActiveInDB(BaseDatabaseTask):
         """
 
         LOG.debug("Mark ACTIVE in DB for health monitor id: %s",
-                  health_mon.id)
-
-        op_status = (constants.ONLINE if health_mon.enabled
-                     else constants.OFFLINE)
+                  health_mon.pool_id)
         self.health_mon_repo.update(db_apis.get_session(),
-                                    health_mon.id,
-                                    provisioning_status=constants.ACTIVE,
-                                    operating_status=op_status)
+                                    health_mon.pool_id,
+                                    provisioning_status=constants.ACTIVE)
 
     def revert(self, health_mon, *args, **kwargs):
         """Mark the health monitor as broken
@@ -1693,9 +1609,9 @@ class MarkHealthMonitorActiveInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark health montor ACTIVE in DB "
-                    "for health monitor id %s", health_mon.id)
-        self.task_utils.mark_health_mon_prov_status_error(health_mon.id)
+        LOG.warning(_LW("Reverting mark health montor ACTIVE in DB "
+                        "for health monitor id %s"), health_mon.pool_id)
+        self.task_utils.mark_health_mon_prov_status_error(health_mon.pool_id)
 
 
 class MarkHealthMonitorPendingCreateInDB(BaseDatabaseTask):
@@ -1712,9 +1628,9 @@ class MarkHealthMonitorPendingCreateInDB(BaseDatabaseTask):
         """
 
         LOG.debug("Mark PENDING CREATE in DB for health monitor id: %s",
-                  health_mon.id)
+                  health_mon.pool_id)
         self.health_mon_repo.update(db_apis.get_session(),
-                                    health_mon.id,
+                                    health_mon.pool_id,
                                     provisioning_status=(constants.
                                                          PENDING_CREATE))
 
@@ -1725,9 +1641,9 @@ class MarkHealthMonitorPendingCreateInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark health monitor pending create in DB "
-                    "for health monitor id %s", health_mon.id)
-        self.task_utils.mark_health_mon_prov_status_error(health_mon.id)
+        LOG.warning(_LW("Reverting mark health monitor pending create in DB "
+                        "for health monitor id %s"), health_mon.pool_id)
+        self.task_utils.mark_health_mon_prov_status_error(health_mon.pool_id)
 
 
 class MarkHealthMonitorPendingDeleteInDB(BaseDatabaseTask):
@@ -1744,9 +1660,9 @@ class MarkHealthMonitorPendingDeleteInDB(BaseDatabaseTask):
         """
 
         LOG.debug("Mark PENDING DELETE in DB for health monitor id: %s",
-                  health_mon.id)
+                  health_mon.pool_id)
         self.health_mon_repo.update(db_apis.get_session(),
-                                    health_mon.id,
+                                    health_mon.pool_id,
                                     provisioning_status=(constants.
                                                          PENDING_DELETE))
 
@@ -1757,9 +1673,9 @@ class MarkHealthMonitorPendingDeleteInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark health monitor pending delete in DB "
-                    "for health monitor id %s", health_mon.id)
-        self.task_utils.mark_health_mon_prov_status_error(health_mon.id)
+        LOG.warning(_LW("Reverting mark health monitor pending delete in DB "
+                        "for health monitor id %s"), health_mon.pool_id)
+        self.task_utils.mark_health_mon_prov_status_error(health_mon.pool_id)
 
 
 class MarkHealthMonitorPendingUpdateInDB(BaseDatabaseTask):
@@ -1776,9 +1692,9 @@ class MarkHealthMonitorPendingUpdateInDB(BaseDatabaseTask):
         """
 
         LOG.debug("Mark PENDING UPDATE in DB for health monitor id: %s",
-                  health_mon.id)
+                  health_mon.pool_id)
         self.health_mon_repo.update(db_apis.get_session(),
-                                    health_mon.id,
+                                    health_mon.pool_id,
                                     provisioning_status=(constants.
                                                          PENDING_UPDATE))
 
@@ -1789,9 +1705,9 @@ class MarkHealthMonitorPendingUpdateInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark health monitor pending update in DB "
-                    "for health monitor id %s", health_mon.id)
-        self.task_utils.mark_health_mon_prov_status_error(health_mon.id)
+        LOG.warning(_LW("Reverting mark health monitor pending update in DB "
+                        "for health monitor id %s"), health_mon.pool_id)
+        self.task_utils.mark_health_mon_prov_status_error(health_mon.pool_id)
 
 
 class MarkL7PolicyActiveInDB(BaseDatabaseTask):
@@ -1809,12 +1725,9 @@ class MarkL7PolicyActiveInDB(BaseDatabaseTask):
 
         LOG.debug("Mark ACTIVE in DB for l7policy id: %s",
                   l7policy.id)
-
-        op_status = constants.ONLINE if l7policy.enabled else constants.OFFLINE
         self.l7policy_repo.update(db_apis.get_session(),
                                   l7policy.id,
-                                  provisioning_status=constants.ACTIVE,
-                                  operating_status=op_status)
+                                  provisioning_status=constants.ACTIVE)
 
     def revert(self, l7policy, *args, **kwargs):
         """Mark the l7policy as broken
@@ -1823,8 +1736,8 @@ class MarkL7PolicyActiveInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark l7policy ACTIVE in DB "
-                    "for l7policy id %s", l7policy.id)
+        LOG.warning(_LW("Reverting mark l7policy ACTIVE in DB "
+                        "for l7policy id %s"), l7policy.id)
         self.task_utils.mark_l7policy_prov_status_error(l7policy.id)
 
 
@@ -1854,8 +1767,8 @@ class MarkL7PolicyPendingCreateInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark l7policy pending create in DB "
-                    "for l7policy id %s", l7policy.id)
+        LOG.warning(_LW("Reverting mark l7policy pending create in DB "
+                        "for l7policy id %s"), l7policy.id)
         self.task_utils.mark_l7policy_prov_status_error(l7policy.id)
 
 
@@ -1885,8 +1798,8 @@ class MarkL7PolicyPendingDeleteInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark l7policy pending delete in DB "
-                    "for l7policy id %s", l7policy.id)
+        LOG.warning(_LW("Reverting mark l7policy pending delete in DB "
+                        "for l7policy id %s"), l7policy.id)
         self.task_utils.mark_l7policy_prov_status_error(l7policy.id)
 
 
@@ -1917,8 +1830,8 @@ class MarkL7PolicyPendingUpdateInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark l7policy pending update in DB "
-                    "for l7policy id %s", l7policy.id)
+        LOG.warning(_LW("Reverting mark l7policy pending update in DB "
+                        "for l7policy id %s"), l7policy.id)
         self.task_utils.mark_l7policy_prov_status_error(l7policy.id)
 
 
@@ -1937,11 +1850,9 @@ class MarkL7RuleActiveInDB(BaseDatabaseTask):
 
         LOG.debug("Mark ACTIVE in DB for l7rule id: %s",
                   l7rule.id)
-        op_status = constants.ONLINE if l7rule.enabled else constants.OFFLINE
         self.l7rule_repo.update(db_apis.get_session(),
                                 l7rule.id,
-                                provisioning_status=constants.ACTIVE,
-                                operating_status=op_status)
+                                provisioning_status=constants.ACTIVE)
 
     def revert(self, l7rule, *args, **kwargs):
         """Mark the l7rule as broken
@@ -1950,8 +1861,8 @@ class MarkL7RuleActiveInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark l7rule ACTIVE in DB "
-                    "for l7rule id %s", l7rule.id)
+        LOG.warning(_LW("Reverting mark l7rule ACTIVE in DB "
+                        "for l7rule id %s"), l7rule.id)
         self.task_utils.mark_l7rule_prov_status_error(l7rule.id)
 
 
@@ -1981,8 +1892,8 @@ class MarkL7RulePendingCreateInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark l7rule pending create in DB "
-                    "for l7rule id %s", l7rule.id)
+        LOG.warning(_LW("Reverting mark l7rule pending create in DB "
+                        "for l7rule id %s"), l7rule.id)
         self.task_utils.mark_l7rule_prov_status_error(l7rule.id)
 
 
@@ -2012,8 +1923,8 @@ class MarkL7RulePendingDeleteInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark l7rule pending delete in DB "
-                    "for l7rule id %s", l7rule.id)
+        LOG.warning(_LW("Reverting mark l7rule pending delete in DB "
+                        "for l7rule id %s"), l7rule.id)
         self.task_utils.mark_l7rule_prov_status_error(l7rule.id)
 
 
@@ -2043,8 +1954,8 @@ class MarkL7RulePendingUpdateInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark l7rule pending update in DB "
-                    "for l7rule id %s", l7rule.id)
+        LOG.warning(_LW("Reverting mark l7rule pending update in DB "
+                        "for l7rule id %s"), l7rule.id)
         self.task_utils.mark_l7rule_prov_status_error(l7rule.id)
 
 
@@ -2073,8 +1984,8 @@ class MarkMemberActiveInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark member ACTIVE in DB "
-                    "for member id %s", member.id)
+        LOG.warning(_LW("Reverting mark member ACTIVE in DB "
+                        "for member id %s"), member.id)
         self.task_utils.mark_member_prov_status_error(member.id)
 
 
@@ -2103,8 +2014,8 @@ class MarkMemberPendingCreateInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark member pending create in DB "
-                    "for member id %s", member.id)
+        LOG.warning(_LW("Reverting mark member pending create in DB "
+                        "for member id %s"), member.id)
         self.task_utils.mark_member_prov_status_error(member.id)
 
 
@@ -2133,8 +2044,8 @@ class MarkMemberPendingDeleteInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark member pending delete in DB "
-                    "for member id %s", member.id)
+        LOG.warning(_LW("Reverting mark member pending delete in DB "
+                        "for member id %s"), member.id)
         self.task_utils.mark_member_prov_status_error(member.id)
 
 
@@ -2164,8 +2075,8 @@ class MarkMemberPendingUpdateInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark member pending update in DB "
-                    "for member id %s", member.id)
+        LOG.warning(_LW("Reverting mark member pending update in DB "
+                        "for member id %s"), member.id)
         self.task_utils.mark_member_prov_status_error(member.id)
 
 
@@ -2195,7 +2106,8 @@ class MarkPoolActiveInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark pool ACTIVE in DB for pool id %s", pool.id)
+        LOG.warning(_LW("Reverting mark pool ACTIVE in DB "
+                        "for pool id %s"), pool.id)
         self.task_utils.mark_pool_prov_status_error(pool.id)
 
 
@@ -2225,8 +2137,8 @@ class MarkPoolPendingCreateInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark pool pending create in DB "
-                    "for pool id %s", pool.id)
+        LOG.warning(_LW("Reverting mark pool pending create in DB "
+                        "for pool id %s"), pool.id)
         self.task_utils.mark_pool_prov_status_error(pool.id)
 
 
@@ -2256,8 +2168,8 @@ class MarkPoolPendingDeleteInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark pool pending delete in DB "
-                    "for pool id %s", pool.id)
+        LOG.warning(_LW("Reverting mark pool pending delete in DB "
+                        "for pool id %s"), pool.id)
         self.task_utils.mark_pool_prov_status_error(pool.id)
 
 
@@ -2287,389 +2199,6 @@ class MarkPoolPendingUpdateInDB(BaseDatabaseTask):
         :returns: None
         """
 
-        LOG.warning("Reverting mark pool pending update in DB "
-                    "for pool id %s", pool.id)
+        LOG.warning(_LW("Reverting mark pool pending update in DB "
+                        "for pool id %s"), pool.id)
         self.task_utils.mark_pool_prov_status_error(pool.id)
-
-
-class DecrementHealthMonitorQuota(BaseDatabaseTask):
-    """Decrements the health monitor quota for a project.
-
-    Since sqlalchemy will likely retry by itself always revert if it fails
-    """
-
-    def execute(self, health_mon):
-        """Decrements the health monitor quota.
-
-        :param health_mon: The health monitor to decrement the quota on.
-        :returns: None
-        """
-
-        LOG.debug("Decrementing health monitor quota for "
-                  "project: %s ", health_mon.project_id)
-
-        lock_session = db_apis.get_session(autocommit=False)
-        try:
-            self.repos.decrement_quota(lock_session,
-                                       data_models.HealthMonitor,
-                                       health_mon.project_id)
-            lock_session.commit()
-        except Exception:
-            with excutils.save_and_reraise_exception():
-                LOG.error('Failed to decrement health monitor quota for '
-                          'project: %(proj)s the project may have excess '
-                          'quota in use.', {'proj': health_mon.project_id})
-                lock_session.rollback()
-
-    def revert(self, health_mon, result, *args, **kwargs):
-        """Re-apply the quota
-
-        :param health_mon: The health monitor to decrement the quota on.
-        :returns: None
-        """
-
-        LOG.warning('Reverting decrement quota for health monitor on project'
-                    ' %(proj)s Project quota counts may be incorrect.',
-                    {'proj': health_mon.project_id})
-
-        # Increment the quota back if this task wasn't the failure
-        if not isinstance(result, failure.Failure):
-
-            try:
-                session = db_apis.get_session()
-                lock_session = db_apis.get_session(autocommit=False)
-                try:
-                    self.repos.check_quota_met(session,
-                                               lock_session,
-                                               data_models.HealthMonitor,
-                                               health_mon.project_id)
-                    lock_session.commit()
-                except Exception:
-                    lock_session.rollback()
-            except Exception:
-                # Don't fail the revert flow
-                pass
-
-
-class DecrementListenerQuota(BaseDatabaseTask):
-    """Decrements the listener quota for a project.
-
-    Since sqlalchemy will likely retry by itself always revert if it fails
-    """
-
-    def execute(self, listener):
-        """Decrements the listener quota.
-
-        :param listener: The listener to decrement the quota on.
-        :returns: None
-        """
-
-        LOG.debug("Decrementing listener quota for "
-                  "project: %s ", listener.project_id)
-
-        lock_session = db_apis.get_session(autocommit=False)
-        try:
-            self.repos.decrement_quota(lock_session,
-                                       data_models.Listener,
-                                       listener.project_id)
-            lock_session.commit()
-        except Exception:
-            with excutils.save_and_reraise_exception():
-                LOG.error('Failed to decrement listener quota for project: '
-                          '%(proj)s the project may have excess quota in use.',
-                          {'proj': listener.project_id})
-                lock_session.rollback()
-
-    def revert(self, listener, result, *args, **kwargs):
-        """Re-apply the quota
-
-        :param listener: The listener to decrement the quota on.
-        :returns: None
-        """
-
-        LOG.warning('Reverting decrement quota for listener on project '
-                    '%(proj)s Project quota counts may be incorrect.',
-                    {'proj': listener.project_id})
-
-        # Increment the quota back if this task wasn't the failure
-        if not isinstance(result, failure.Failure):
-
-            try:
-                session = db_apis.get_session()
-                lock_session = db_apis.get_session(autocommit=False)
-                try:
-                    self.repos.check_quota_met(session,
-                                               lock_session,
-                                               data_models.Listener,
-                                               listener.project_id)
-                    lock_session.commit()
-                except Exception:
-                    lock_session.rollback()
-            except Exception:
-                # Don't fail the revert flow
-                pass
-
-
-class DecrementLoadBalancerQuota(BaseDatabaseTask):
-    """Decrements the load balancer quota for a project.
-
-    Since sqlalchemy will likely retry by itself always revert if it fails
-    """
-
-    def execute(self, loadbalancer):
-        """Decrements the load balancer quota.
-
-        :param loadbalancer: The load balancer to decrement the quota on.
-        :returns: None
-        """
-
-        LOG.debug("Decrementing load balancer quota for "
-                  "project: %s ", loadbalancer.project_id)
-
-        lock_session = db_apis.get_session(autocommit=False)
-        try:
-            self.repos.decrement_quota(lock_session,
-                                       data_models.LoadBalancer,
-                                       loadbalancer.project_id)
-            lock_session.commit()
-        except Exception:
-            with excutils.save_and_reraise_exception():
-                LOG.error('Failed to decrement load balancer quota for '
-                          'project: %(proj)s the project may have excess '
-                          'quota in use.', {'proj': loadbalancer.project_id})
-                lock_session.rollback()
-
-    def revert(self, loadbalancer, result, *args, **kwargs):
-        """Re-apply the quota
-
-        :param loadbalancer: The load balancer to decrement the quota on.
-        :returns: None
-        """
-
-        LOG.warning('Reverting decrement quota for load balancer on project '
-                    '%(proj)s Project quota counts may be incorrect.',
-                    {'proj': loadbalancer.project_id})
-
-        # Increment the quota back if this task wasn't the failure
-        if not isinstance(result, failure.Failure):
-
-            try:
-                session = db_apis.get_session()
-                lock_session = db_apis.get_session(autocommit=False)
-                try:
-                    self.repos.check_quota_met(session,
-                                               lock_session,
-                                               data_models.LoadBalancer,
-                                               loadbalancer.project_id)
-                    lock_session.commit()
-                except Exception:
-                    lock_session.rollback()
-            except Exception:
-                # Don't fail the revert flow
-                pass
-
-
-class DecrementMemberQuota(BaseDatabaseTask):
-    """Decrements the member quota for a project.
-
-    Since sqlalchemy will likely retry by itself always revert if it fails
-    """
-
-    def execute(self, member):
-        """Decrements the member quota.
-
-        :param member: The member to decrement the quota on.
-        :returns: None
-        """
-
-        LOG.debug("Decrementing member quota for "
-                  "project: %s ", member.project_id)
-
-        lock_session = db_apis.get_session(autocommit=False)
-        try:
-            self.repos.decrement_quota(lock_session,
-                                       data_models.Member,
-                                       member.project_id)
-            lock_session.commit()
-        except Exception:
-            with excutils.save_and_reraise_exception():
-                LOG.error('Failed to decrement member quota for project: '
-                          '%(proj)s the project may have excess quota in use.',
-                          {'proj': member.project_id})
-                lock_session.rollback()
-
-    def revert(self, member, result, *args, **kwargs):
-        """Re-apply the quota
-
-        :param member: The member to decrement the quota on.
-        :returns: None
-        """
-
-        LOG.warning('Reverting decrement quota for member on project %(proj)s '
-                    'Project quota counts may be incorrect.',
-                    {'proj': member.project_id})
-
-        # Increment the quota back if this task wasn't the failure
-        if not isinstance(result, failure.Failure):
-
-            try:
-                session = db_apis.get_session()
-                lock_session = db_apis.get_session(autocommit=False)
-                try:
-                    self.repos.check_quota_met(session,
-                                               lock_session,
-                                               data_models.Member,
-                                               member.project_id)
-                    lock_session.commit()
-                except Exception:
-                    lock_session.rollback()
-            except Exception:
-                # Don't fail the revert flow
-                pass
-
-
-class DecrementPoolQuota(BaseDatabaseTask):
-    """Decrements the pool quota for a project.
-
-    Since sqlalchemy will likely retry by itself always revert if it fails
-    """
-
-    def execute(self, pool, pool_child_count):
-        """Decrements the pool quota.
-
-        :param pool: The pool to decrement the quota on
-        :returns: None
-        """
-
-        LOG.debug("Decrementing pool quota for "
-                  "project: %s ", pool.project_id)
-
-        lock_session = db_apis.get_session(autocommit=False)
-        try:
-            self.repos.decrement_quota(lock_session,
-                                       data_models.Pool,
-                                       pool.project_id)
-
-            # Pools cascade delete members and health monitors
-            # update the quota for those items as well.
-            if pool_child_count['HM'] > 0:
-                self.repos.decrement_quota(lock_session,
-                                           data_models.HealthMonitor,
-                                           pool.project_id)
-            if pool_child_count['member'] > 0:
-                self.repos.decrement_quota(
-                    lock_session, data_models.Member,
-                    pool.project_id, quantity=pool_child_count['member'])
-
-            lock_session.commit()
-        except Exception:
-            with excutils.save_and_reraise_exception():
-                LOG.error('Failed to decrement pool quota for project: '
-                          '%(proj)s the project may have excess quota in use.',
-                          {'proj': pool.project_id})
-                lock_session.rollback()
-
-    def revert(self, pool, pool_child_count, result, *args, **kwargs):
-        """Re-apply the quota
-
-        :param project_id: The id of project to decrement the quota on
-        :returns: None
-        """
-
-        LOG.warning('Reverting decrement quota for pool on project %(proj)s '
-                    'Project quota counts may be incorrect.',
-                    {'proj': pool.project_id})
-
-        # Increment the quota back if this task wasn't the failure
-        if not isinstance(result, failure.Failure):
-
-            # These are all independent to maximize the correction
-            # in case other quota actions have occurred
-            try:
-                session = db_apis.get_session()
-                lock_session = db_apis.get_session(autocommit=False)
-                try:
-                    self.repos.check_quota_met(session,
-                                               lock_session,
-                                               data_models.Pool,
-                                               pool.project_id)
-                    lock_session.commit()
-                except Exception:
-                    lock_session.rollback()
-
-                # Attempt to increment back the health monitor quota
-                if pool_child_count['HM'] > 0:
-                    lock_session = db_apis.get_session(autocommit=False)
-                    try:
-                        self.repos.check_quota_met(session,
-                                                   lock_session,
-                                                   data_models.HealthMonitor,
-                                                   pool.project_id)
-                        lock_session.commit()
-                    except Exception:
-                        lock_session.rollback()
-
-                # Attempt to increment back the member quota
-                # This is separate calls to maximize the correction
-                # should other factors have increased the in use quota
-                # before this point in the revert flow
-                for i in six.moves.range(pool_child_count['member']):
-                    lock_session = db_apis.get_session(autocommit=False)
-                    try:
-                        self.repos.check_quota_met(session,
-                                                   lock_session,
-                                                   data_models.Member,
-                                                   pool.project_id)
-                        lock_session.commit()
-                    except Exception:
-                        lock_session.rollback()
-            except Exception:
-                # Don't fail the revert flow
-                pass
-
-
-class CountPoolChildrenForQuota(BaseDatabaseTask):
-    """Counts the pool child resources for quota management.
-
-    Since the children of pools are cleaned up by the sqlalchemy
-    cascade delete settings, we need to collect the quota counts
-    for the child objects early.
-
-    """
-
-    def execute(self, pool):
-        """Count the pool child resources for quota management
-
-        :param pool: The pool to count children on
-        :returns: None
-        """
-
-        LOG.debug("Counting pool children for "
-                  "project: %s ", pool.project_id)
-
-        health_mon_count = 1 if pool.health_monitor else 0
-        member_count = len(pool.members)
-
-        return {'HM': health_mon_count, 'member': member_count}
-
-
-class UpdatePoolMembersOperatingStatusInDB(BaseDatabaseTask):
-    """Updates the members of a pool operating status.
-
-    Since sqlalchemy will likely retry by itself always revert if it fails
-    """
-
-    def execute(self, pool, operating_status):
-        """Update the members of a pool operating status in DB.
-
-        :param pool: Pool object to be updated
-        :param operating_status: Operating status to set
-        :returns: None
-        """
-
-        LOG.debug("Updating member operating status to %(status)s in DB for "
-                  "pool id: %(pool)s", {'status': operating_status,
-                                        'pool': pool.id})
-        self.member_repo.update_pool_members(db_apis.get_session(),
-                                             pool.id,
-                                             operating_status=operating_status)

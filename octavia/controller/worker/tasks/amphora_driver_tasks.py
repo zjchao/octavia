@@ -13,20 +13,22 @@
 # under the License.
 #
 
+import logging
+
 from oslo_config import cfg
-from oslo_log import log as logging
 import six
 from stevedore import driver as stevedore_driver
 from taskflow import task
 from taskflow.types import failure
 
-from octavia.amphorae.driver_exceptions import exceptions as driver_except
 from octavia.common import constants
 from octavia.controller.worker import task_utils as task_utilities
 from octavia.db import api as db_apis
 from octavia.db import repositories as repo
+from octavia.i18n import _LE, _LW
 
 CONF = cfg.CONF
+CONF.import_group('controller_worker', 'octavia.common.config')
 LOG = logging.getLogger(__name__)
 
 
@@ -46,25 +48,6 @@ class BaseAmphoraTask(task.Task):
         self.task_utils = task_utilities.TaskUtils()
 
 
-class AmpListenersUpdate(BaseAmphoraTask):
-    """Task to update the listeners on one amphora."""
-
-    def execute(self, listeners, amphora_index, amphorae, timeout_dict=()):
-        # Note, we don't want this to cause a revert as it may be used
-        # in a failover flow with both amps failing. Skip it and let
-        # health manager fix it.
-        try:
-            self.amphora_driver.update_amphora_listeners(
-                listeners, amphora_index, amphorae, timeout_dict)
-        except Exception as e:
-            amphora_id = amphorae[amphora_index].id
-            LOG.error('Failed to update listeners on amphora %s. Skipping '
-                      'this amphora as it is failing to update due to: %s',
-                      amphora_id, str(e))
-            self.amphora_repo.update(db_apis.get_session(), amphora_id,
-                                     status=constants.ERROR)
-
-
 class ListenersUpdate(BaseAmphoraTask):
     """Task to update amphora with all specified listeners' configurations."""
 
@@ -77,7 +60,7 @@ class ListenersUpdate(BaseAmphoraTask):
     def revert(self, loadbalancer, *args, **kwargs):
         """Handle failed listeners updates."""
 
-        LOG.warning("Reverting listeners updates.")
+        LOG.warning(_LW("Reverting listeners updates."))
 
         for listener in loadbalancer.listeners:
             self.task_utils.mark_listener_prov_status_error(listener.id)
@@ -96,7 +79,7 @@ class ListenerStop(BaseAmphoraTask):
     def revert(self, listener, *args, **kwargs):
         """Handle a failed listener stop."""
 
-        LOG.warning("Reverting listener stop.")
+        LOG.warning(_LW("Reverting listener stop."))
 
         self.task_utils.mark_listener_prov_status_error(listener.id)
 
@@ -114,7 +97,7 @@ class ListenerStart(BaseAmphoraTask):
     def revert(self, listener, *args, **kwargs):
         """Handle a failed listener start."""
 
-        LOG.warning("Reverting listener start.")
+        LOG.warning(_LW("Reverting listener start."))
 
         self.task_utils.mark_listener_prov_status_error(listener.id)
 
@@ -124,16 +107,16 @@ class ListenerStart(BaseAmphoraTask):
 class ListenersStart(BaseAmphoraTask):
     """Task to start all listeners on the vip."""
 
-    def execute(self, loadbalancer, listeners, amphora=None):
+    def execute(self, loadbalancer, listeners):
         """Execute listener start routines for listeners on an amphora."""
         for listener in listeners:
-            self.amphora_driver.start(listener, loadbalancer.vip, amphora)
+            self.amphora_driver.start(listener, loadbalancer.vip)
         LOG.debug("Started the listeners on the vip")
 
     def revert(self, listeners, *args, **kwargs):
         """Handle failed listeners starts."""
 
-        LOG.warning("Reverting listeners starts.")
+        LOG.warning(_LW("Reverting listeners starts."))
         for listener in listeners:
             self.task_utils.mark_listener_prov_status_error(listener.id)
 
@@ -151,7 +134,7 @@ class ListenerDelete(BaseAmphoraTask):
     def revert(self, listener, *args, **kwargs):
         """Handle a failed listener delete."""
 
-        LOG.warning("Reverting listener delete.")
+        LOG.warning(_LW("Reverting listener delete."))
 
         self.task_utils.mark_listener_prov_status_error(listener.id)
 
@@ -184,7 +167,7 @@ class AmphoraFinalize(BaseAmphoraTask):
         """Handle a failed amphora finalize."""
         if isinstance(result, failure.Failure):
             return
-        LOG.warning("Reverting amphora finalize.")
+        LOG.warning(_LW("Reverting amphora finalize."))
         self.task_utils.mark_amphora_status_error(amphora.id)
 
 
@@ -203,7 +186,7 @@ class AmphoraPostNetworkPlug(BaseAmphoraTask):
         """Handle a failed post network plug."""
         if isinstance(result, failure.Failure):
             return
-        LOG.warning("Reverting post network plug.")
+        LOG.warning(_LW("Reverting post network plug."))
         self.task_utils.mark_amphora_status_error(amphora.id)
 
 
@@ -221,7 +204,7 @@ class AmphoraePostNetworkPlug(BaseAmphoraTask):
         """Handle a failed post network plug."""
         if isinstance(result, failure.Failure):
             return
-        LOG.warning("Reverting post network plug.")
+        LOG.warning(_LW("Reverting post network plug."))
         for amphora in six.moves.filter(
             lambda amp: amp.status == constants.AMPHORA_ALLOCATED,
                 loadbalancer.amphorae):
@@ -242,7 +225,7 @@ class AmphoraPostVIPPlug(BaseAmphoraTask):
         """Handle a failed amphora vip plug notification."""
         if isinstance(result, failure.Failure):
             return
-        LOG.warning("Reverting post vip plug.")
+        LOG.warning(_LW("Reverting post vip plug."))
         self.task_utils.mark_amphora_status_error(amphora.id)
         self.task_utils.mark_loadbalancer_prov_status_error(loadbalancer.id)
 
@@ -262,7 +245,7 @@ class AmphoraePostVIPPlug(BaseAmphoraTask):
         """Handle a failed amphora vip plug notification."""
         if isinstance(result, failure.Failure):
             return
-        LOG.warning("Reverting amphorae post vip plug.")
+        LOG.warning(_LW("Reverting amphorae post vip plug."))
         self.task_utils.mark_loadbalancer_prov_status_error(loadbalancer.id)
 
 
@@ -281,31 +264,15 @@ class AmphoraUpdateVRRPInterface(BaseAmphoraTask):
     def execute(self, loadbalancer):
         """Execute post_vip_routine."""
         amps = []
-        timeout_dict = {
-            constants.CONN_MAX_RETRIES:
-                CONF.haproxy_amphora.active_connection_max_retries,
-            constants.CONN_RETRY_INTERVAL:
-                CONF.haproxy_amphora.active_connection_rety_interval}
         for amp in six.moves.filter(
             lambda amp: amp.status == constants.AMPHORA_ALLOCATED,
                 loadbalancer.amphorae):
-
-            try:
-                interface = self.amphora_driver.get_vrrp_interface(
-                    amp, timeout_dict=timeout_dict)
-            except Exception as e:
-                # This can occur when an active/standby LB has no listener
-                LOG.error('Failed to get amphora VRRP interface on amphora '
-                          '%s. Skipping this amphora as it is failing due to: '
-                          '%s', amp.id, str(e))
-                self.amphora_repo.update(db_apis.get_session(), amp.id,
-                                         status=constants.ERROR)
-                continue
-
-            self.amphora_repo.update(db_apis.get_session(), amp.id,
-                                     vrrp_interface=interface)
-            amps.append(self.amphora_repo.get(db_apis.get_session(),
-                                              id=amp.id))
+                    # Currently this is supported only with REST Driver
+                    interface = self.amphora_driver.get_vrrp_interface(amp)
+                    self.amphora_repo.update(db_apis.get_session(), amp.id,
+                                             vrrp_interface=interface)
+                    amps.append(self.amphora_repo.get(db_apis.get_session(),
+                                                      id=amp.id))
         loadbalancer.amphorae = amps
         return loadbalancer
 
@@ -313,7 +280,7 @@ class AmphoraUpdateVRRPInterface(BaseAmphoraTask):
         """Handle a failed amphora vip plug notification."""
         if isinstance(result, failure.Failure):
             return
-        LOG.warning("Reverting Get Amphora VRRP Interface.")
+        LOG.warning(_LW("Reverting Get Amphora VRRP Interface."))
         for amp in six.moves.filter(
             lambda amp: amp.status == constants.AMPHORA_ALLOCATED,
                 loadbalancer.amphorae):
@@ -322,9 +289,10 @@ class AmphoraUpdateVRRPInterface(BaseAmphoraTask):
                 self.amphora_repo.update(db_apis.get_session(), amp.id,
                                          vrrp_interface=None)
             except Exception as e:
-                LOG.error("Failed to update amphora %(amp)s "
-                          "VRRP interface to None due to: %(except)s",
-                          {'amp': amp.id, 'except': e})
+                LOG.error(_LE("Failed to update amphora %(amp)s "
+                              "VRRP interface to None due to: "
+                              "%(except)s"), {'amp': amp.id,
+                                              'except': e})
 
 
 class AmphoraVRRPUpdate(BaseAmphoraTask):
@@ -342,7 +310,7 @@ class AmphoraVRRPStop(BaseAmphoraTask):
 
     def execute(self, loadbalancer):
         self.amphora_driver.stop_vrrp_service(loadbalancer)
-        LOG.debug("Stopped VRRP of loadbalancer %s amphorae",
+        LOG.debug("Stopped VRRP of loadbalancer % amphorae",
                   loadbalancer.id)
 
 
@@ -353,22 +321,3 @@ class AmphoraVRRPStart(BaseAmphoraTask):
         self.amphora_driver.start_vrrp_service(loadbalancer)
         LOG.debug("Started VRRP of loadbalancer %s amphorae",
                   loadbalancer.id)
-
-
-class AmphoraComputeConnectivityWait(BaseAmphoraTask):
-    """"Task to wait for the compute instance to be up."""
-
-    def execute(self, amphora):
-        """Execute get_info routine for an amphora until it responds."""
-        try:
-            amp_info = self.amphora_driver.get_info(amphora)
-            LOG.debug('Successfuly connected to amphora %s: %s',
-                      amphora.id, amp_info)
-        except driver_except.TimeOutException:
-            LOG.error("Amphora compute instance failed to become reachable. "
-                      "This either means the compute driver failed to fully "
-                      "boot the instance inside the timeout interval or the "
-                      "instance is not reachable via the lb-mgmt-net.")
-            self.amphora_repo.update(db_apis.get_session(), amphora.id,
-                                     status=constants.ERROR)
-            raise

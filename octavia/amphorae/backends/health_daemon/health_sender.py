@@ -18,8 +18,10 @@ from oslo_config import cfg
 from oslo_log import log as logging
 
 from octavia.amphorae.backends.health_daemon import status_message
+from octavia.i18n import _LE
 
 CONF = cfg.CONF
+CONF.import_group('health_manager', 'octavia.common.config')
 LOG = logging.getLogger(__name__)
 
 
@@ -35,13 +37,8 @@ class UDPStatusSender(object):
     def __init__(self):
         self.dests = []
         for ipport in CONF.health_manager.controller_ip_port_list:
-            try:
-                ip, port = ipport.rsplit(':', 1)
-            except ValueError:
-                LOG.error("Invalid ip and port '%s' in health_manager "
-                          "controller_ip_port_list", ipport)
-                break
-            self.update(ip, port)
+            parts = ipport.split(':')
+            self.update(parts[0], parts[1])
         self.v4sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.v6sock = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
         self.key = str(CONF.health_manager.heartbeat_key)
@@ -54,15 +51,20 @@ class UDPStatusSender(object):
             self.dests.append(addr)  # Just grab the first match
             break
 
-    def _send_msg(self, dest, msg):
-        envelope_str = status_message.wrap_envelope(msg, self.key)
+    def dosend(self, obj):
+        envelope_str = status_message.wrap_envelope(obj, self.key)
+        addrinfo = round_robin_addr(self.dests)
         # dest = (family, socktype, proto, canonname, sockaddr)
         # e.g. 0 = sock family, 4 = sockaddr - what we actually need
+        if addrinfo is None:
+            LOG.error(_LE('No controller address found. '
+                          'Unable to send heartbeat.'))
+            return
         try:
-            if dest[0] == socket.AF_INET:
-                self.v4sock.sendto(envelope_str, dest[4])
-            elif dest[0] == socket.AF_INET6:
-                self.v6sock.sendto(envelope_str, dest[4])
+            if addrinfo[0] == socket.AF_INET:
+                self.v4sock.sendto(envelope_str, addrinfo[4])
+            elif addrinfo[0] == socket.AF_INET6:
+                self.v6sock.sendto(envelope_str, addrinfo[4])
         except socket.error:
             # Pass here as on amp boot it will get one or more
             # error: [Errno 101] Network is unreachable
@@ -70,10 +72,3 @@ class UDPStatusSender(object):
             # No harm in trying to send as it will still failover
             # if the message isn't received
             pass
-
-    def dosend(self, obj):
-        dest = round_robin_addr(self.dests)
-        if dest is None:
-            LOG.error('No controller address found. Unable to send heartbeat.')
-            return
-        self._send_msg(dest, obj)

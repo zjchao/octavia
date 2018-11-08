@@ -50,7 +50,7 @@ class TestPoolFlows(base.TestCase):
         self.assertIn(constants.POOL, pool_flow.requires)
 
         self.assertEqual(3, len(pool_flow.requires))
-        self.assertEqual(1, len(pool_flow.provides))
+        self.assertEqual(0, len(pool_flow.provides))
 
     def test_get_delete_pool_flow_internal(self):
 
@@ -60,7 +60,7 @@ class TestPoolFlows(base.TestCase):
         self.assertIn('test', pool_flow.requires)
 
         self.assertEqual(1, len(pool_flow.requires))
-        self.assertEqual(1, len(pool_flow.provides))
+        self.assertEqual(0, len(pool_flow.provides))
 
     def test_get_update_pool_flow(self):
 

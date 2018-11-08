@@ -1,29 +1,105 @@
-.. octavia documentation master file
+.. octavia-specs documentation master file
 
-=====================
-Octavia Documentation
-=====================
+====
+Main
+====
 
-Welcome to the OpenStack Octavia project documentation. Octavia brings
-network load balancing to OpenStack.
-
-See :doc:`reference/introduction` for an overview of Octavia.
-
-To align with the overall OpenStack documentation, the Octavia documentation
-is grouped into the following topic areas.
+Getting started
+---------------
 
 .. toctree::
    :maxdepth: 1
 
-   admin/index.rst
-   Octavia API Reference <https://developer.openstack.org/api-ref/load-balancer/>
-   cli/index.rst
-   configuration/index.rst
-   contributor/index.rst
-   install/index.rst
-   reference/index.rst
-   user/index.rst
+   main/introduction.rst
+   main/glossary.rst
 
+For users
+---------
 
+.. toctree::
+   :maxdepth: 1
 
-:ref:`search`
+   guides/basic-cookbook.rst
+   guides/l7.rst
+   guides/l7-cookbook.rst
+
+For developers
+--------------
+
+.. toctree::
+   :maxdepth: 1
+
+   guides/dev-quick-start.rst
+   main/CONSTITUTION.rst
+   main/HACKING.rst
+   devref/flows.rst
+   main/gmr.rst
+
+For operators
+-------------
+
+.. toctree::
+   :maxdepth: 1
+
+   guides/dev-quick-start.rst
+   main/configref.rst
+
+====
+APIs
+====
+
+.. toctree::
+   :glob:
+   :maxdepth: 1
+
+   api/*
+
+====================
+Design Documentation
+====================
+
+Version 0.5 (liberty)
+---------------------
+
+.. toctree::
+   :glob:
+   :maxdepth: 1
+
+   design/version0.5/*
+
+======================
+Project Specifications
+======================
+
+Version 0.5 (liberty)
+---------------------
+
+.. toctree::
+   :glob:
+   :maxdepth: 1
+
+   specs/version0.5/*
+
+Version 0.8 (mitaka)
+--------------------
+
+.. toctree::
+   :glob:
+   :maxdepth: 1
+
+   specs/version0.8/*
+
+Version 0.9 (newton)
+--------------------
+
+.. toctree::
+   :glob:
+   :maxdepth: 1
+
+   specs/version0.9/*
+
+==================
+Indices and tables
+==================
+
+* :ref:`search`

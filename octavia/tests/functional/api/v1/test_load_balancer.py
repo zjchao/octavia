@@ -19,25 +19,10 @@ from oslo_utils import uuidutils
 
 from octavia.common import constants
 from octavia.network import base as network_base
-from octavia.network import data_models as network_models
 from octavia.tests.functional.api.v1 import base
 
 
 class TestLoadBalancer(base.BaseAPITest):
-
-    def _assert_request_matches_response(self, req, resp, **optionals):
-        self.assertTrue(uuidutils.is_uuid_like(resp.get('id')))
-        self.assertEqual(req.get('name'), resp.get('name'))
-        self.assertEqual(req.get('description'), resp.get('description'))
-        self.assertEqual(constants.PENDING_CREATE,
-                         resp.get('provisioning_status'))
-        self.assertEqual(constants.OFFLINE, resp.get('operating_status'))
-        self.assertEqual(req.get('enabled', True), resp.get('enabled'))
-        self.assertIsNotNone(resp.get('created_at'))
-        self.assertIsNone(resp.get('updated_at'))
-        for key, value in optionals.items():
-            self.assertEqual(value, req.get(key))
-        self.assert_final_lb_statuses(resp.get('id'))
 
     def test_empty_list(self):
         response = self.get(self.LBS_PATH)
@@ -45,209 +30,43 @@ class TestLoadBalancer(base.BaseAPITest):
         self.assertEqual([], api_list)
 
     def test_create(self, **optionals):
-        lb_json = {'name': 'test1',
-                   'vip': {'subnet_id': uuidutils.generate_uuid()},
-                   'project_id': self.project_id}
+        lb_json = {'name': 'test1', 'vip': {}}
         lb_json.update(optionals)
         response = self.post(self.LBS_PATH, lb_json)
         api_lb = response.json
-        self._assert_request_matches_response(lb_json, api_lb)
+        self.assertTrue(uuidutils.is_uuid_like(api_lb.get('id')))
+        self.assertEqual(lb_json.get('name'), api_lb.get('name'))
+        self.assertEqual(constants.PENDING_CREATE,
+                         api_lb.get('provisioning_status'))
+        self.assertEqual(constants.OFFLINE,
+                         api_lb.get('operating_status'))
+        self.assertTrue(api_lb.get('enabled'))
+        self.assertIsNotNone(api_lb.get('created_at'))
+        self.assertIsNone(api_lb.get('updated_at'))
+        for key, value in optionals.items():
+            self.assertEqual(value, lb_json.get(key))
+        self.assert_final_lb_statuses(api_lb.get('id'))
 
     def test_create_with_id(self):
         self.test_create(id=uuidutils.generate_uuid())
 
     def test_create_with_duplicate_id(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()})
-        self.post(self.LBS_PATH,
-                  {'id': lb.get('id'),
-                   'vip': {'subnet_id': uuidutils.generate_uuid()}},
+        lb = self.create_load_balancer({})
+        self.post(self.LBS_PATH, {'id': lb.get('id'), 'vip': {}},
                   status=409, expect_errors=True)
+
+    def test_create_without_vip(self):
+        lb_json = {'name': 'test1'}
+        self.post(self.LB_PATH, lb_json, status=400)
 
     def test_create_with_project_id(self):
         self.test_create(project_id=uuidutils.generate_uuid())
 
-    def test_create_over_quota(self):
-        lb_json = {'name': 'test1',
-                   'vip': {'subnet_id': uuidutils.generate_uuid()},
-                   'project_id': self.project_id}
-        self.check_quota_met_true_mock.start()
-        self.addCleanup(self.check_quota_met_true_mock.stop)
-        self.post(self.LBS_PATH, lb_json, status=403)
-
-    def test_create_without_vip(self):
-        lb_json = {}
-        response = self.post(self.LBS_PATH, lb_json, status=400)
-        err_msg = ("Invalid input for field/attribute vip. Value: 'None'. "
-                   "Mandatory field missing.")
-        self.assertEqual(response.json.get('faultstring'), err_msg)
-
-    def test_create_with_empty_vip(self):
-        lb_json = {'vip': {},
-                   'project_id': self.project_id}
-        response = self.post(self.LBS_PATH, lb_json, status=400)
-        err_msg = ('Validation failure: '
-                   'VIP must contain one of: port_id, network_id, subnet_id.')
-        self.assertEqual(response.json.get('faultstring'), err_msg)
-
-    def test_create_with_invalid_vip_subnet(self):
-        subnet_id = uuidutils.generate_uuid()
-        lb_json = {'vip': {'subnet_id': subnet_id},
-                   'project_id': self.project_id}
-        with mock.patch("octavia.network.drivers.noop_driver.driver"
-                        ".NoopManager.get_subnet") as mock_get_subnet:
-            mock_get_subnet.side_effect = network_base.SubnetNotFound
-            response = self.post(self.LBS_PATH, lb_json, status=400)
-            err_msg = 'Subnet {} not found.'.format(subnet_id)
-            self.assertEqual(response.json.get('faultstring'), err_msg)
-
-    def test_create_with_invalid_vip_network_subnet(self):
-        network = network_models.Network(id=uuidutils.generate_uuid(),
-                                         subnets=[])
-        subnet_id = uuidutils.generate_uuid()
-        lb_json = {
-            'vip': {
-                'subnet_id': subnet_id,
-                'network_id': network.id
-            },
-            'project_id': self.project_id}
-        with mock.patch("octavia.network.drivers.noop_driver.driver"
-                        ".NoopManager.get_network") as mock_get_network:
-            mock_get_network.return_value = network
-            response = self.post(self.LBS_PATH, lb_json, status=400)
-            err_msg = 'Subnet {} not found.'.format(subnet_id)
-            self.assertEqual(response.json.get('faultstring'), err_msg)
-
-    def test_create_with_vip_subnet_fills_network(self):
-        subnet = network_models.Subnet(id=uuidutils.generate_uuid(),
-                                       network_id=uuidutils.generate_uuid())
-        vip = {'subnet_id': subnet.id}
-        lb_json = {'vip': vip,
-                   'project_id': self.project_id}
-        with mock.patch("octavia.network.drivers.noop_driver.driver"
-                        ".NoopManager.get_subnet") as mock_get_subnet:
-            mock_get_subnet.return_value = subnet
-            response = self.post(self.LBS_PATH, lb_json)
-        api_lb = response.json
-        self._assert_request_matches_response(lb_json, api_lb)
-        self.assertEqual(subnet.id,
-                         api_lb.get('vip', {}).get('subnet_id'))
-        self.assertEqual(subnet.network_id,
-                         api_lb.get('vip', {}).get('network_id'))
-
-    def test_create_with_vip_network_has_no_subnet(self):
-        network = network_models.Network(id=uuidutils.generate_uuid(),
-                                         subnets=[])
-        lb_json = {
-            'vip': {'network_id': network.id},
-            'project_id': self.project_id}
-        with mock.patch("octavia.network.drivers.noop_driver.driver"
-                        ".NoopManager.get_network") as mock_get_network:
-            mock_get_network.return_value = network
-            response = self.post(self.LBS_PATH, lb_json, status=400)
-            err_msg = ("Validation failure: "
-                       "Supplied network does not contain a subnet.")
-            self.assertEqual(response.json.get('faultstring'), err_msg)
-
-    def test_create_with_vip_network_picks_subnet_ipv4(self):
-        network_id = uuidutils.generate_uuid()
-        subnet1 = network_models.Subnet(id=uuidutils.generate_uuid(),
-                                        network_id=network_id,
-                                        ip_version=6)
-        subnet2 = network_models.Subnet(id=uuidutils.generate_uuid(),
-                                        network_id=network_id,
-                                        ip_version=4)
-        network = network_models.Network(id=network_id,
-                                         subnets=[subnet1.id, subnet2.id])
-        vip = {'network_id': network.id}
-        lb_json = {'vip': vip,
-                   'project_id': self.project_id}
-        with mock.patch(
-                "octavia.network.drivers.noop_driver.driver.NoopManager"
-                ".get_network") as mock_get_network, mock.patch(
-            "octavia.network.drivers.noop_driver.driver.NoopManager"
-                ".get_subnet") as mock_get_subnet:
-            mock_get_network.return_value = network
-            mock_get_subnet.side_effect = [subnet1, subnet2]
-            response = self.post(self.LBS_PATH, lb_json)
-        api_lb = response.json
-        self._assert_request_matches_response(lb_json, api_lb)
-        self.assertEqual(subnet2.id,
-                         api_lb.get('vip', {}).get('subnet_id'))
-        self.assertEqual(network_id,
-                         api_lb.get('vip', {}).get('network_id'))
-
-    def test_create_with_vip_network_picks_subnet_ipv6(self):
-        network_id = uuidutils.generate_uuid()
-        subnet = network_models.Subnet(id=uuidutils.generate_uuid(),
-                                       network_id=network_id,
-                                       ip_version=6)
-        network = network_models.Network(id=network_id,
-                                         subnets=[subnet.id])
-        vip = {'network_id': network.id}
-        lb_json = {'vip': vip,
-                   'project_id': self.project_id}
-        with mock.patch(
-                "octavia.network.drivers.noop_driver.driver.NoopManager"
-                ".get_network") as mock_get_network, mock.patch(
-            "octavia.network.drivers.noop_driver.driver.NoopManager"
-                ".get_subnet") as mock_get_subnet:
-            mock_get_network.return_value = network
-            mock_get_subnet.return_value = subnet
-            response = self.post(self.LBS_PATH, lb_json)
-        api_lb = response.json
-        self._assert_request_matches_response(lb_json, api_lb)
-        self.assertEqual(subnet.id,
-                         api_lb.get('vip', {}).get('subnet_id'))
-        self.assertEqual(network_id,
-                         api_lb.get('vip', {}).get('network_id'))
-
-    def test_create_with_vip_full(self):
-        subnet = network_models.Subnet(id=uuidutils.generate_uuid())
-        network = network_models.Network(id=uuidutils.generate_uuid(),
-                                         subnets=[subnet])
-        port = network_models.Port(id=uuidutils.generate_uuid(),
-                                   network_id=network.id)
-        vip = {'ip_address': '10.0.0.1',
-               'subnet_id': subnet.id,
-               'network_id': network.id,
-               'port_id': port.id}
-        lb_json = {'name': 'test1', 'description': 'test1_desc',
-                   'vip': vip, 'enabled': False,
-                   'project_id': self.project_id}
-        with mock.patch(
-                "octavia.network.drivers.noop_driver.driver.NoopManager"
-                ".get_network") as mock_get_network, mock.patch(
-            "octavia.network.drivers.noop_driver.driver.NoopManager"
-                ".get_port") as mock_get_port:
-            mock_get_network.return_value = network
-            mock_get_port.return_value = port
-            response = self.post(self.LBS_PATH, lb_json)
-        api_lb = response.json
-        self._assert_request_matches_response(lb_json, api_lb)
-        self.assertEqual(vip, api_lb.get('vip'))
-
-    def test_create_with_long_name(self):
-        lb_json = {'name': 'n' * 256, 'vip': {}}
-        self.post(self.LBS_PATH, lb_json, status=400)
-
-    def test_create_with_long_description(self):
-        lb_json = {'description': 'n' * 256, 'vip': {}}
-        self.post(self.LBS_PATH, lb_json, status=400)
-
-    def test_create_with_nonuuid_vip_attributes(self):
-        lb_json = {'vip': {'subnet_id': 'HI'}}
-        self.post(self.LBS_PATH, lb_json, status=400)
-
     def test_get_all(self):
-        lb1 = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()}, name='lb1')
-        lb2 = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()}, name='lb2')
-        lb3 = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()}, name='lb3')
-        response = self.get(self.LBS_PATH,
-                            params={'project_id': self.project_id})
+        lb1 = self.create_load_balancer({}, name='lb1')
+        lb2 = self.create_load_balancer({}, name='lb2')
+        lb3 = self.create_load_balancer({}, name='lb3')
+        response = self.get(self.LBS_PATH)
         lbs = response.json
         lb_id_names = [(lb.get('id'), lb.get('name')) for lb in lbs]
         self.assertEqual(3, len(lbs))
@@ -258,15 +77,9 @@ class TestLoadBalancer(base.BaseAPITest):
     def test_get_all_by_project_id(self):
         project1_id = uuidutils.generate_uuid()
         project2_id = uuidutils.generate_uuid()
-        lb1 = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', project_id=project1_id)
-        lb2 = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb2', project_id=project1_id)
-        lb3 = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb3', project_id=project2_id)
+        lb1 = self.create_load_balancer({}, name='lb1', project_id=project1_id)
+        lb2 = self.create_load_balancer({}, name='lb2', project_id=project1_id)
+        lb3 = self.create_load_balancer({}, name='lb3', project_id=project2_id)
         project1_path = "{0}?project_id={1}".format(self.LBS_PATH, project1_id)
         response = self.get(project1_path)
         lbs = response.json
@@ -282,25 +95,12 @@ class TestLoadBalancer(base.BaseAPITest):
         self.assertIn((lb3.get('id'), lb3.get('name')), lb_id_names)
 
     def test_get(self):
-        subnet = network_models.Subnet(id=uuidutils.generate_uuid())
-        network = network_models.Network(id=uuidutils.generate_uuid(),
-                                         subnets=[subnet])
-        port = network_models.Port(id=uuidutils.generate_uuid(),
-                                   network_id=network.id)
         vip = {'ip_address': '10.0.0.1',
-               'subnet_id': subnet.id,
-               'network_id': network.id,
-               'port_id': port.id}
-        with mock.patch(
-                "octavia.network.drivers.noop_driver.driver.NoopManager"
-                ".get_network") as mock_get_network, mock.patch(
-            "octavia.network.drivers.noop_driver.driver.NoopManager."
-                "get_port") as mock_get_port:
-            mock_get_network.return_value = network
-            mock_get_port.return_value = port
-            lb = self.create_load_balancer(vip, name='lb1',
-                                           description='test1_desc',
-                                           enabled=False)
+               'port_id': uuidutils.generate_uuid(),
+               'subnet_id': uuidutils.generate_uuid()}
+        lb = self.create_load_balancer(vip, name='lb1',
+                                       description='test1_desc',
+                                       enabled=False)
         response = self.get(self.LB_PATH.format(lb_id=lb.get('id')))
         self.assertEqual('lb1', response.json.get('name'))
         self.assertEqual('test1_desc', response.json.get('description'))
@@ -311,10 +111,40 @@ class TestLoadBalancer(base.BaseAPITest):
         path = self.LB_PATH.format(lb_id='SEAN-CONNERY')
         self.get(path, status=404)
 
+    def test_create_with_vip(self):
+        vip = {'ip_address': '10.0.0.1',
+               'subnet_id': uuidutils.generate_uuid(),
+               'port_id': uuidutils.generate_uuid()}
+        lb_json = {'name': 'test1', 'description': 'test1_desc',
+                   'vip': vip, 'enabled': False}
+        response = self.post(self.LBS_PATH, lb_json)
+        api_lb = response.json
+        self.assertTrue(uuidutils.is_uuid_like(api_lb.get('id')))
+        self.assertEqual(lb_json.get('name'), api_lb.get('name'))
+        self.assertEqual(lb_json.get('description'), api_lb.get('description'))
+        self.assertEqual(constants.PENDING_CREATE,
+                         api_lb['provisioning_status'])
+        self.assertEqual(constants.OFFLINE,
+                         api_lb['operating_status'])
+        self.assertEqual(vip, api_lb.get('vip'))
+        self.assertEqual(lb_json.get('enabled'), api_lb.get('enabled'))
+        self.assert_final_lb_statuses(api_lb.get('id'))
+
+    def test_create_with_long_name(self):
+        lb_json = {'name': 'n' * 256, 'vip': {}}
+        self.post(self.LBS_PATH, lb_json, status=400)
+
+    def test_create_with_long_description(self):
+        lb_json = {'description': 'n' * 256, 'vip': {}}
+        self.post(self.LBS_PATH, lb_json, status=400)
+
+    def test_create_with_nonuuid_vip_attributes(self):
+        lb_json = {'vip': {'subnet_id': 'HI'}}
+        self.post(self.LBS_PATH, lb_json, status=400)
+
     def test_update(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', description='desc1', enabled=False)
+        lb = self.create_load_balancer({}, name='lb1', description='desc1',
+                                       enabled=False)
         lb_json = {'name': 'lb2'}
         lb = self.set_lb_status(lb.get('id'))
         response = self.put(self.LB_PATH.format(lb_id=lb.get('id')), lb_json)
@@ -333,9 +163,8 @@ class TestLoadBalancer(base.BaseAPITest):
         self.assert_final_lb_statuses(api_lb.get('id'))
 
     def test_update_with_vip(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', description='desc1', enabled=False)
+        lb = self.create_load_balancer({}, name='lb1', description='desc1',
+                                       enabled=False)
         lb_json = {'vip': {'subnet_id': '1234'}}
         lb = self.set_lb_status(lb.get('id'))
         self.put(self.LB_PATH.format(lb_id=lb.get('id')), lb_json, status=400)
@@ -345,64 +174,56 @@ class TestLoadBalancer(base.BaseAPITest):
         self.put(path, body={}, status=404)
 
     def test_update_pending_create(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', description='desc1', enabled=False)
+        lb = self.create_load_balancer({}, name='lb1', description='desc1',
+                                       enabled=False)
         lb_json = {'name': 'Roberto'}
         self.put(self.LB_PATH.format(lb_id=lb.get('id')), lb_json, status=409)
 
     def test_delete_pending_create(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', description='desc1', enabled=False)
+        lb = self.create_load_balancer({}, name='lb1', description='desc1',
+                                       enabled=False)
         self.delete(self.LB_PATH.format(lb_id=lb.get('id')), status=409)
 
     def test_update_pending_update(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', description='desc1', enabled=False)
+        lb = self.create_load_balancer({}, name='lb1', description='desc1',
+                                       enabled=False)
         lb_json = {'name': 'Bob'}
         lb = self.set_lb_status(lb.get('id'))
         self.put(self.LB_PATH.format(lb_id=lb.get('id')), lb_json)
         self.put(self.LB_PATH.format(lb_id=lb.get('id')), lb_json, status=409)
 
     def test_delete_pending_update(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', description='desc1', enabled=False)
+        lb = self.create_load_balancer({}, name='lb1', description='desc1',
+                                       enabled=False)
         lb_json = {'name': 'Steve'}
         lb = self.set_lb_status(lb.get('id'))
         self.put(self.LB_PATH.format(lb_id=lb.get('id')), lb_json)
         self.delete(self.LB_PATH.format(lb_id=lb.get('id')), status=409)
 
     def test_delete_with_error_status(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', description='desc1', enabled=False)
+        lb = self.create_load_balancer({}, name='lb1', description='desc1',
+                                       enabled=False)
         lb = self.set_lb_status(lb.get('id'), status=constants.ERROR)
         self.delete(self.LB_PATH.format(lb_id=lb.get('id')), status=202)
 
     def test_update_pending_delete(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', description='desc1', enabled=False)
+        lb = self.create_load_balancer({}, name='lb1', description='desc1',
+                                       enabled=False)
         lb = self.set_lb_status(lb.get('id'))
         self.delete(self.LB_PATH.format(lb_id=lb.get('id')))
         lb_json = {'name': 'John'}
         self.put(self.LB_PATH.format(lb_id=lb.get('id')), lb_json, status=409)
 
     def test_delete_pending_delete(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', description='desc1', enabled=False)
+        lb = self.create_load_balancer({}, name='lb1', description='desc1',
+                                       enabled=False)
         lb = self.set_lb_status(lb.get('id'))
         self.delete(self.LB_PATH.format(lb_id=lb.get('id')))
         self.delete(self.LB_PATH.format(lb_id=lb.get('id')), status=409)
 
     def test_delete(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', description='desc1', enabled=False)
+        lb = self.create_load_balancer({}, name='lb1', description='desc1',
+                                       enabled=False)
         lb = self.set_lb_status(lb.get('id'))
         self.delete(self.LB_PATH.format(lb_id=lb.get('id')))
         response = self.get(self.LB_PATH.format(lb_id=lb.get('id')))
@@ -416,35 +237,35 @@ class TestLoadBalancer(base.BaseAPITest):
                          api_lb.get('operational_status'))
         self.assert_final_lb_statuses(api_lb.get('id'), delete=True)
 
-    def test_delete_with_listener(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', description='desc1', enabled=False)
-        lb = self.set_lb_status(lb.get('id'))
-        self.create_listener(
-            lb_id=lb.get('id'),
-            protocol=constants.PROTOCOL_HTTP,
-            protocol_port=80
-        )
-        lb = self.set_lb_status(lb.get('id'))
-        self.delete(self.LB_PATH.format(lb_id=lb.get('id')), status=400)
-
-    def test_delete_with_pool(self):
-        lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()},
-            name='lb1', description='desc1', enabled=False)
-        lb = self.set_lb_status(lb.get('id'))
-        self.create_pool_sans_listener(
-            lb_id=lb.get('id'),
-            protocol=constants.PROTOCOL_HTTP,
-            lb_algorithm=constants.LB_ALGORITHM_ROUND_ROBIN
-        )
-        lb = self.set_lb_status(lb.get('id'))
-        self.delete(self.LB_PATH.format(lb_id=lb.get('id')), status=400)
-
     def test_delete_bad_lb_id(self):
         path = self.LB_PATH.format(lb_id='bad_uuid')
         self.delete(path, status=404)
+
+    def test_create_with_bad_subnet(self, **optionals):
+        with mock.patch(
+                'octavia.common.utils.get_network_driver') as net_mock:
+            net_mock.return_value.get_subnet = mock.Mock(
+                side_effect=network_base.SubnetNotFound('Subnet not found'))
+            subnet_id = uuidutils.generate_uuid()
+            lb_json = {'name': 'test1', 'vip': {'subnet_id': subnet_id,
+                                                'ip_address': '10.0.0.1'}}
+            lb_json.update(optionals)
+            response = self.post(self.LBS_PATH, lb_json, expect_errors=True)
+            err_msg = 'Subnet ' + subnet_id + ' not found.'
+            self.assertEqual(response.json.get('faultstring'), err_msg)
+
+    def test_create_with_valid_subnet(self, **optionals):
+        subnet_id = uuidutils.generate_uuid()
+        with mock.patch(
+                'octavia.common.utils.get_network_driver') as net_mock:
+            net_mock.return_value.get_subnet.return_value = subnet_id
+            lb_json = {'name': 'test1', 'vip': {'subnet_id': subnet_id,
+                                                'ip_address': '10.0.0.1'}}
+            lb_json.update(optionals)
+            response = self.post(self.LBS_PATH, lb_json)
+            api_lb = response.json
+            self.assertEqual(lb_json.get('vip')['subnet_id'],
+                             api_lb.get('vip')['subnet_id'])
 
 
 class TestLoadBalancerGraph(base.BaseAPITest):
@@ -457,8 +278,6 @@ class TestLoadBalancerGraph(base.BaseAPITest):
         observed_graph_copy = copy.deepcopy(observed_graph)
         del observed_graph_copy['created_at']
         del observed_graph_copy['updated_at']
-        self.assertEqual(observed_graph_copy['project_id'],
-                         observed_graph_copy.pop('tenant_id'))
         obs_lb_id = observed_graph_copy.pop('id')
 
         self.assertTrue(uuidutils.is_uuid_like(obs_lb_id))
@@ -468,8 +287,6 @@ class TestLoadBalancerGraph(base.BaseAPITest):
         for observed_listener in observed_listeners:
             del observed_listener['created_at']
             del observed_listener['updated_at']
-            self.assertEqual(observed_listener['project_id'],
-                             observed_listener.pop('tenant_id'))
 
             self.assertTrue(uuidutils.is_uuid_like(
                 observed_listener.pop('id')))
@@ -480,19 +297,15 @@ class TestLoadBalancerGraph(base.BaseAPITest):
                 default_pool.pop('id')
                 default_pool.pop('created_at')
                 default_pool.pop('updated_at')
-                self.assertEqual(default_pool['project_id'],
-                                 default_pool.pop('tenant_id'))
-                hm = default_pool.get('health_monitor')
+                hm = default_pool.get('healthmonitor')
                 if hm:
-                    self.assertEqual(hm['project_id'],
-                                     hm.pop('tenant_id'))
+                    self.assertTrue(hm.get('id'))
+                    hm.pop('id')
                 for member in default_pool.get('members', []):
                     self.assertTrue(member.get('id'))
                     member.pop('id')
                     member.pop('created_at')
                     member.pop('updated_at')
-                    self.assertEqual(member['project_id'],
-                                     member.pop('tenant_id'))
             if observed_listener.get('sni_containers'):
                 observed_listener['sni_containers'].sort()
             o_l7policies = observed_listener.get('l7policies')
@@ -504,8 +317,6 @@ class TestLoadBalancerGraph(base.BaseAPITest):
                         r_pool.pop('id')
                         r_pool.pop('created_at')
                         r_pool.pop('updated_at')
-                        self.assertEqual(r_pool['project_id'],
-                                         r_pool.pop('tenant_id'))
                         self.assertTrue(o_l7policy.get('redirect_pool_id'))
                         o_l7policy.pop('redirect_pool_id')
                         if r_pool.get('members'):
@@ -514,8 +325,6 @@ class TestLoadBalancerGraph(base.BaseAPITest):
                                 r_member.pop('id')
                                 r_member.pop('created_at')
                                 r_member.pop('updated_at')
-                                self.assertEqual(r_member['project_id'],
-                                                 r_member.pop('tenant_id'))
                     self.assertTrue(o_l7policy.get('id'))
                     o_l7policy.pop('id')
                     l7rules = o_l7policy.get('l7rules')
@@ -525,23 +334,22 @@ class TestLoadBalancerGraph(base.BaseAPITest):
             self.assertIn(observed_listener, expected_listeners)
 
     def _get_lb_bodies(self, create_listeners, expected_listeners):
-        subnet_id = uuidutils.generate_uuid()
         create_lb = {
             'name': 'lb1',
             'project_id': self._project_id,
-            'vip': {'subnet_id': subnet_id},
+            'vip': {},
             'listeners': create_listeners
         }
         expected_lb = {
             'description': None,
             'enabled': True,
             'provisioning_status': constants.PENDING_CREATE,
-            'operating_status': constants.OFFLINE,
+            'operating_status': constants.OFFLINE
         }
         expected_lb.update(create_lb)
         expected_lb['listeners'] = expected_listeners
         expected_lb['vip'] = {'ip_address': None, 'port_id': None,
-                              'subnet_id': subnet_id, 'network_id': None}
+                              'subnet_id': None}
         return create_lb, expected_lb
 
     def _get_listener_bodies(self, name='listener1', protocol_port=80,
@@ -628,9 +436,7 @@ class TestLoadBalancerGraph(base.BaseAPITest):
             'weight': 1,
             'enabled': True,
             'subnet_id': None,
-            'operating_status': constants.NO_MONITOR,
-            'monitor_address': None,
-            'monitor_port': None
+            'operating_status': constants.OFFLINE
         }
         expected_member.update(create_member)
         return create_member, expected_member
@@ -645,9 +451,9 @@ class TestLoadBalancerGraph(base.BaseAPITest):
             'project_id': self._project_id
         }
         expected_hm = {
-            'http_method': 'GET',
-            'url_path': '/',
-            'expected_codes': '200',
+            'http_method': None,
+            'url_path': None,
+            'expected_codes': None,
             'enabled': True
         }
         expected_hm.update(create_hm)
@@ -684,7 +490,6 @@ class TestLoadBalancerGraph(base.BaseAPITest):
             'name': None,
             'description': None,
             'redirect_url': None,
-            'redirect_prefix': None,
             'l7rules': []
         }
         expected_l7policy.update(create_l7policy)

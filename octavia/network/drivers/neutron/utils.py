@@ -47,8 +47,7 @@ def convert_port_dict_to_model(port_dict):
         status=port.get('status'),
         project_id=port.get('tenant_id'),
         admin_state_up=port.get('admin_state_up'),
-        fixed_ips=fixed_ips,
-        qos_policy_id=port.get('qos_policy_id')
+        fixed_ips=fixed_ips
     )
 
 
@@ -72,25 +71,3 @@ def convert_fixed_ip_dict_to_model(fixed_ip_dict):
     fixed_ip = fixed_ip_dict.get('fixed_ip', fixed_ip_dict)
     return network_models.FixedIP(subnet_id=fixed_ip.get('subnet_id'),
                                   ip_address=fixed_ip.get('ip_address'))
-
-
-def convert_qos_policy_dict_to_model(qos_policy_dict):
-    qos_policy = qos_policy_dict.get('policy', qos_policy_dict)
-    return network_models.QosPolicy(id=qos_policy.get('id'))
-
-
-# We can't use "floating_ip" because we need to match the neutron client method
-def convert_floatingip_dict_to_model(floating_ip_dict):
-    floating_ip = floating_ip_dict.get('floatingip', floating_ip_dict)
-    return network_models.FloatingIP(
-        id=floating_ip.get('id'),
-        description=floating_ip.get('description'),
-        project_id=floating_ip.get('project_id', floating_ip.get('tenant_id')),
-        status=floating_ip.get('status'),
-        router_id=floating_ip.get('router_id'),
-        port_id=floating_ip.get('port_id'),
-        floating_network_id=floating_ip.get('floating_network_id'),
-        floating_ip_address=floating_ip.get('floating_ip_address'),
-        fixed_ip_address=floating_ip.get('fixed_ip_address'),
-        fixed_port_id=floating_ip.get('fixed_port_id')
-    )

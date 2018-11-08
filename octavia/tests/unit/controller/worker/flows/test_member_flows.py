@@ -39,9 +39,8 @@ class TestMemberFlows(base.TestCase):
 
         self.assertIn(constants.LISTENERS, member_flow.requires)
         self.assertIn(constants.LOADBALANCER, member_flow.requires)
-        self.assertIn(constants.POOL, member_flow.requires)
 
-        self.assertEqual(4, len(member_flow.requires))
+        self.assertEqual(3, len(member_flow.requires))
         self.assertEqual(2, len(member_flow.provides))
 
     def test_get_delete_member_flow(self, mock_get_net_driver):
@@ -50,12 +49,11 @@ class TestMemberFlows(base.TestCase):
 
         self.assertIsInstance(member_flow, flow.Flow)
 
-        self.assertIn(constants.MEMBER, member_flow.requires)
         self.assertIn(constants.LISTENERS, member_flow.requires)
         self.assertIn(constants.LOADBALANCER, member_flow.requires)
-        self.assertIn(constants.POOL, member_flow.requires)
+        self.assertIn(constants.MEMBER, member_flow.requires)
 
-        self.assertEqual(4, len(member_flow.requires))
+        self.assertEqual(3, len(member_flow.requires))
         self.assertEqual(0, len(member_flow.provides))
 
     def test_get_update_member_flow(self, mock_get_net_driver):
@@ -64,25 +62,9 @@ class TestMemberFlows(base.TestCase):
 
         self.assertIsInstance(member_flow, flow.Flow)
 
-        self.assertIn(constants.MEMBER, member_flow.requires)
         self.assertIn(constants.LISTENERS, member_flow.requires)
         self.assertIn(constants.LOADBALANCER, member_flow.requires)
-        self.assertIn(constants.POOL, member_flow.requires)
         self.assertIn(constants.UPDATE_DICT, member_flow.requires)
 
-        self.assertEqual(5, len(member_flow.requires))
+        self.assertEqual(4, len(member_flow.requires))
         self.assertEqual(0, len(member_flow.provides))
-
-    def test_get_batch_update_members_flow(self, mock_get_net_driver):
-
-        member_flow = self.MemberFlow.get_batch_update_members_flow(
-            [], [], [])
-
-        self.assertIsInstance(member_flow, flow.Flow)
-
-        self.assertIn(constants.LISTENERS, member_flow.requires)
-        self.assertIn(constants.LOADBALANCER, member_flow.requires)
-        self.assertIn(constants.POOL, member_flow.requires)
-
-        self.assertEqual(3, len(member_flow.requires))
-        self.assertEqual(2, len(member_flow.provides))

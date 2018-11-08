@@ -22,6 +22,7 @@ from octavia.tests.unit.certificates.generator import local_csr
 
 
 CONF = cfg.CONF
+CONF.import_group('anchor', 'octavia.common.config')
 
 
 class TestAnchorGenerator(local_csr.BaseLocalCSRTestCase):

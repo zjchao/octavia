@@ -26,22 +26,18 @@ def create_load_balancer_tree(lb_dict):
     prepped_lb['listeners'] = []
     for listener_dict in listeners:
         pool = listener_dict.pop('default_pool') or None
-        listener_dict['project_id'] = prepped_lb.get('project_id')
         prepped_listener = create_listener(listener_dict, prepped_lb.get('id'))
         if pool:
             hm = pool.pop('health_monitor') or None
             members = pool.pop('members') or []
-            pool['project_id'] = prepped_lb.get('project_id')
             prepped_pool = create_pool(pool)
             pool_id = prepped_pool.get('id')
             prepped_pool['load_balancer_id'] = prepped_lb.get('id')
             if hm:
-                hm['project_id'] = lb_dict.get('project_id')
                 prepped_hm = create_health_monitor(hm, pool_id)
                 prepped_pool['health_monitor'] = prepped_hm
             prepped_pool['members'] = []
             for member_dict in members:
-                member_dict['project_id'] = prepped_lb.get('project_id')
                 prepped_pool['members'].append(
                     create_member(member_dict, pool_id))
             prepped_listener['default_pool'] = prepped_pool
@@ -62,37 +58,22 @@ def create_load_balancer(lb_dict):
         lb_dict['id'] = uuidutils.generate_uuid()
     if lb_dict.get('vip'):
         lb_dict['vip']['load_balancer_id'] = lb_dict.get('id')
-    lb_dict[constants.PROVISIONING_STATUS] = constants.PENDING_CREATE
-    lb_dict[constants.OPERATING_STATUS] = constants.OFFLINE
+    lb_dict['provisioning_status'] = constants.PENDING_CREATE
+    lb_dict['operating_status'] = constants.OFFLINE
     return lb_dict
 
 
 def create_listener(listener_dict, lb_id):
     if not listener_dict.get('id'):
         listener_dict['id'] = uuidutils.generate_uuid()
-    if 'loadbalancer_id' in listener_dict:
-        listener_dict['load_balancer_id'] = listener_dict.pop(
-            'loadbalancer_id')
-    else:
-        listener_dict['load_balancer_id'] = lb_id
-
-    listener_dict[constants.PROVISIONING_STATUS] = constants.PENDING_CREATE
-    listener_dict[constants.OPERATING_STATUS] = constants.OFFLINE
+    listener_dict['load_balancer_id'] = lb_id
+    listener_dict['provisioning_status'] = constants.PENDING_CREATE
+    listener_dict['operating_status'] = constants.OFFLINE
     # NOTE(blogan): Throwing away because we should not store secure data
     # in the database nor should we send it to a handler.
     if 'tls_termination' in listener_dict:
         del listener_dict['tls_termination']
-
-    if 'default_tls_container_ref' in listener_dict:
-        listener_dict['tls_certificate_id'] = (
-            listener_dict.pop('default_tls_container_ref'))
-
-    if 'sni_containers' in listener_dict:
-        sni_container_ids = listener_dict.pop('sni_containers') or []
-    elif 'sni_container_refs' in listener_dict:
-        sni_container_ids = listener_dict.pop('sni_container_refs') or []
-    else:
-        sni_container_ids = []
+    sni_container_ids = listener_dict.pop('sni_containers') or []
     sni_containers = [{'listener_id': listener_dict.get('id'),
                        'tls_container_id': sni_container_id}
                       for sni_container_id in sni_container_ids]
@@ -103,8 +84,6 @@ def create_listener(listener_dict, lb_id):
 def create_l7policy(l7policy_dict, lb_id, listener_id):
     l7policy_dict = validate.sanitize_l7policy_api_args(l7policy_dict,
                                                         create=True)
-    l7policy_dict[constants.PROVISIONING_STATUS] = constants.PENDING_CREATE
-    l7policy_dict[constants.OPERATING_STATUS] = constants.OFFLINE
     if not l7policy_dict.get('id'):
         l7policy_dict['id'] = uuidutils.generate_uuid()
     l7policy_dict['listener_id'] = listener_id
@@ -113,9 +92,6 @@ def create_l7policy(l7policy_dict, lb_id, listener_id):
         prepped_pool = create_pool(pool_dict, lb_id)
         l7policy_dict['redirect_pool'] = prepped_pool
         l7policy_dict['redirect_pool_id'] = prepped_pool['id']
-    rules = l7policy_dict.pop('rules', None)
-    if rules:
-        l7policy_dict['l7rules'] = rules
     if l7policy_dict.get('l7rules'):
         if (len(l7policy_dict.get('l7rules')) >
                 constants.MAX_L7RULES_PER_L7POLICY):
@@ -132,22 +108,16 @@ def create_l7policy(l7policy_dict, lb_id, listener_id):
 
 
 def create_l7rule(l7rule_dict, l7policy_id):
-    l7rule_dict[constants.PROVISIONING_STATUS] = constants.PENDING_CREATE
-    l7rule_dict[constants.OPERATING_STATUS] = constants.OFFLINE
     if not l7rule_dict.get('id'):
         l7rule_dict['id'] = uuidutils.generate_uuid()
     l7rule_dict['l7policy_id'] = l7policy_id
-    if 'enabled' not in l7rule_dict:
-        l7rule_dict['enabled'] = True
     return l7rule_dict
 
 
 def create_pool(pool_dict, lb_id=None):
     if not pool_dict.get('id'):
         pool_dict['id'] = uuidutils.generate_uuid()
-    if 'loadbalancer_id' in pool_dict:
-        pool_dict['load_balancer_id'] = pool_dict.pop('loadbalancer_id')
-    else:
+    if lb_id:
         pool_dict['load_balancer_id'] = lb_id
     if pool_dict.get('session_persistence'):
         pool_dict['session_persistence']['pool_id'] = pool_dict.get('id')
@@ -157,30 +127,16 @@ def create_pool(pool_dict, lb_id=None):
         prepped_members = []
         for member_dict in pool_dict.get('members'):
             prepped_members.append(create_member(member_dict, pool_dict['id']))
-    pool_dict[constants.PROVISIONING_STATUS] = constants.PENDING_CREATE
-    pool_dict[constants.OPERATING_STATUS] = constants.OFFLINE
+    pool_dict['operating_status'] = constants.OFFLINE
     return pool_dict
 
 
-def create_member(member_dict, pool_id, has_health_monitor=False):
+def create_member(member_dict, pool_id):
     member_dict['pool_id'] = pool_id
-    member_dict[constants.PROVISIONING_STATUS] = constants.PENDING_CREATE
-    if has_health_monitor:
-        member_dict[constants.OPERATING_STATUS] = constants.OFFLINE
-    else:
-        member_dict[constants.OPERATING_STATUS] = constants.NO_MONITOR
-    if 'backup' not in member_dict:
-        member_dict['backup'] = False
+    member_dict['operating_status'] = constants.OFFLINE
     return member_dict
 
 
-def create_health_monitor(hm_dict, pool_id=None):
-    hm_dict[constants.PROVISIONING_STATUS] = constants.PENDING_CREATE
-    hm_dict[constants.OPERATING_STATUS] = constants.OFFLINE
-    if pool_id:
-        hm_dict['id'] = pool_id
-        hm_dict['pool_id'] = pool_id
-    else:
-        if not hm_dict.get('id'):
-            hm_dict['id'] = uuidutils.generate_uuid()
+def create_health_monitor(hm_dict, pool_id):
+    hm_dict['pool_id'] = pool_id
     return hm_dict

@@ -57,16 +57,12 @@ class PoolFlows(object):
                       constants.LOADBALANCER]))
         delete_pool_flow.add(database_tasks.MarkPoolPendingDeleteInDB(
             requires=constants.POOL))
-        delete_pool_flow.add(database_tasks.CountPoolChildrenForQuota(
-            requires=constants.POOL, provides=constants.POOL_CHILD_COUNT))
         delete_pool_flow.add(model_tasks.DeleteModelObject(
             rebind={constants.OBJECT: constants.POOL}))
         delete_pool_flow.add(amphora_driver_tasks.ListenersUpdate(
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
         delete_pool_flow.add(database_tasks.DeletePoolInDB(
             requires=constants.POOL))
-        delete_pool_flow.add(database_tasks.DecrementPoolQuota(
-            requires=[constants.POOL, constants.POOL_CHILD_COUNT]))
         delete_pool_flow.add(database_tasks.MarkLBAndListenersActiveInDB(
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
 
@@ -80,25 +76,9 @@ class PoolFlows(object):
         delete_pool_flow = linear_flow.Flow(constants.DELETE_POOL_FLOW)
         # health monitor should cascade
         # members should cascade
-        delete_pool_flow.add(database_tasks.MarkPoolPendingDeleteInDB(
-            name='mark_pool_pending_delete_in_db_' + name,
-            requires=constants.POOL,
-            rebind={constants.POOL: name}))
-        delete_pool_flow.add(database_tasks.CountPoolChildrenForQuota(
-            name='count_pool_children_for_quota_' + name,
-            requires=constants.POOL,
-            provides=constants.POOL_CHILD_COUNT,
-            rebind={constants.POOL: name}))
-        delete_pool_flow.add(model_tasks.DeleteModelObject(
-            name='delete_model_object_' + name,
-            rebind={constants.OBJECT: name}))
         delete_pool_flow.add(database_tasks.DeletePoolInDB(
             name='delete_pool_in_db_' + name,
             requires=constants.POOL,
-            rebind={constants.POOL: name}))
-        delete_pool_flow.add(database_tasks.DecrementPoolQuota(
-            name='decrement_pool_quota_' + name,
-            requires=[constants.POOL, constants.POOL_CHILD_COUNT],
             rebind={constants.POOL: name}))
 
         return delete_pool_flow
@@ -115,6 +95,10 @@ class PoolFlows(object):
                       constants.LOADBALANCER]))
         update_pool_flow.add(database_tasks.MarkPoolPendingUpdateInDB(
             requires=constants.POOL))
+        update_pool_flow.add(model_tasks.
+                             UpdateAttributes(
+                                 rebind={constants.OBJECT: constants.POOL},
+                                 requires=[constants.UPDATE_DICT]))
         update_pool_flow.add(amphora_driver_tasks.ListenersUpdate(
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
         update_pool_flow.add(database_tasks.UpdatePoolInDB(

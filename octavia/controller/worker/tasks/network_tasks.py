@@ -13,20 +13,22 @@
 # under the License.
 #
 
+import logging
+
 from oslo_config import cfg
-from oslo_log import log as logging
 import six
 from taskflow import task
 from taskflow.types import failure
 
 from octavia.common import constants
 from octavia.common import utils
-from octavia.controller.worker import task_utils
+from octavia.i18n import _LW, _LE
 from octavia.network import base
 from octavia.network import data_models as n_data_models
 
 LOG = logging.getLogger(__name__)
 CONF = cfg.CONF
+CONF.import_group('controller_worker', 'octavia.common.config')
 
 
 class BaseNetworkTask(task.Task):
@@ -34,14 +36,8 @@ class BaseNetworkTask(task.Task):
 
     def __init__(self, **kwargs):
         super(BaseNetworkTask, self).__init__(**kwargs)
-        self._network_driver = None
-        self.task_utils = task_utils.TaskUtils()
 
-    @property
-    def network_driver(self):
-        if self._network_driver is None:
-            self._network_driver = utils.get_network_driver()
-        return self._network_driver
+        self.network_driver = utils.get_network_driver()
 
 
 class CalculateAmphoraDelta(BaseNetworkTask):
@@ -53,9 +49,12 @@ class CalculateAmphoraDelta(BaseNetworkTask):
 
         # Figure out what networks we want
         # seed with lb network(s)
-        vrrp_port = self.network_driver.get_port(amphora.vrrp_port_id)
-        desired_network_ids = {vrrp_port.network_id}.union(
+        subnet = self.network_driver.get_subnet(loadbalancer.vip.subnet_id)
+        # TODO(ptoohill): amp_network is deprecated, remove when ready...
+        desired_network_ids = {subnet.network_id}.union(
             CONF.controller_worker.amp_boot_network_list)
+        if CONF.controller_worker.amp_network:
+            desired_network_ids.add(CONF.controller_worker.amp_network)
 
         for pool in loadbalancer.pools:
             member_networks = [
@@ -96,9 +95,8 @@ class CalculateDelta(BaseNetworkTask):
         """Compute which NICs need to be plugged
 
         for the amphora to become operational.
-
         :param loadbalancer: the loadbalancer to calculate deltas for all
-                             amphorae
+                              amphorae
         :returns: dict of octavia.network.data_models.Delta keyed off amphora
                   id
         """
@@ -144,7 +142,7 @@ class PlugNetworks(BaseNetworkTask):
 
         if not delta:
             LOG.debug("No network deltas for amphora id: %s", amphora.id)
-            return
+            return None
 
         # add nics
         for nic in delta.add_nics:
@@ -154,7 +152,7 @@ class PlugNetworks(BaseNetworkTask):
     def revert(self, amphora, delta, *args, **kwargs):
         """Handle a failed network plug by removing all nics added."""
 
-        LOG.warning("Unable to plug networks for amp id %s", amphora.id)
+        LOG.warning(_LW("Unable to plug networks for amp id %s"), amphora.id)
         if not delta:
             return
 
@@ -179,7 +177,7 @@ class UnPlugNetworks(BaseNetworkTask):
         LOG.debug("Unplug network for amphora")
         if not delta:
             LOG.debug("No network deltas for amphora id: %s", amphora.id)
-            return
+            return None
 
         for nic in delta.delete_nics:
             try:
@@ -187,9 +185,10 @@ class UnPlugNetworks(BaseNetworkTask):
                                                    nic.network_id)
             except base.NetworkNotFound:
                 LOG.debug("Network %d not found", nic.network_id)
+                pass
             except Exception:
-                LOG.exception("Unable to unplug network")
-                # TODO(xgerman) follow up if that makes sense
+                LOG.exception(_LE("Unable to unplug network"))
+                pass  # Todo(german) follow up if that makes sense
 
 
 class GetMemberPorts(BaseNetworkTask):
@@ -213,55 +212,6 @@ class GetMemberPorts(BaseNetworkTask):
             else:
                 member_ports.append(port)
         return member_ports
-
-
-class HandleNetworkDelta(BaseNetworkTask):
-    """Task to plug and unplug networks
-
-    Plug or unplug networks based on delta
-    """
-
-    def execute(self, amphora, delta):
-        """Handle network plugging based off deltas."""
-        added_ports = {}
-        added_ports[amphora.id] = []
-        for nic in delta.add_nics:
-            interface = self.network_driver.plug_network(delta.compute_id,
-                                                         nic.network_id)
-            port = self.network_driver.get_port(interface.port_id)
-            port.network = self.network_driver.get_network(port.network_id)
-            for fixed_ip in port.fixed_ips:
-                fixed_ip.subnet = self.network_driver.get_subnet(
-                    fixed_ip.subnet_id)
-            added_ports[amphora.id].append(port)
-        for nic in delta.delete_nics:
-            try:
-                self.network_driver.unplug_network(delta.compute_id,
-                                                   nic.network_id)
-            except base.NetworkNotFound:
-                LOG.debug("Network %d not found ", nic.network_id)
-            except Exception:
-                LOG.exception("Unable to unplug network")
-        return added_ports
-
-    def revert(self, result, amphora, delta, *args, **kwargs):
-        """Handle a network plug or unplug failures."""
-
-        if isinstance(result, failure.Failure):
-            return
-
-        if not delta:
-            return
-
-        LOG.warning("Unable to plug networks for amp id %s",
-                    delta.amphora_id)
-
-        for nic in delta.add_nics:
-            try:
-                self.network_driver.unplug_network(delta.compute_id,
-                                                   nic.network_id)
-            except Exception:
-                pass
 
 
 class HandleNetworkDeltas(BaseNetworkTask):
@@ -292,7 +242,7 @@ class HandleNetworkDeltas(BaseNetworkTask):
                 except base.NetworkNotFound:
                     LOG.debug("Network %d not found ", nic.network_id)
                 except Exception:
-                    LOG.exception("Unable to unplug network")
+                    LOG.exception(_LE("Unable to unplug network"))
         return added_ports
 
     def revert(self, result, deltas, *args, **kwargs):
@@ -301,7 +251,7 @@ class HandleNetworkDeltas(BaseNetworkTask):
         if isinstance(result, failure.Failure):
             return
         for amp_id, delta in six.iteritems(deltas):
-            LOG.warning("Unable to plug networks for amp id %s",
+            LOG.warning(_LW("Unable to plug networks for amp id %s"),
                         delta.amphora_id)
             if not delta:
                 return
@@ -331,14 +281,13 @@ class PlugVIP(BaseNetworkTask):
 
         if isinstance(result, failure.Failure):
             return
-        LOG.warning("Unable to plug VIP for loadbalancer id %s",
+        LOG.warning(_LW("Unable to plug VIP for loadbalancer id %s"),
                     loadbalancer.id)
 
         try:
             # Make sure we have the current port IDs for cleanup
             for amp_data in result:
                 for amphora in six.moves.filter(
-                        # pylint: disable=cell-var-from-loop
                         lambda amp: amp.id == amp_data.id,
                         loadbalancer.amphorae):
                     amphora.vrrp_port_id = amp_data.vrrp_port_id
@@ -346,8 +295,9 @@ class PlugVIP(BaseNetworkTask):
 
             self.network_driver.unplug_vip(loadbalancer, loadbalancer.vip)
         except Exception as e:
-            LOG.error("Failed to unplug VIP.  Resources may still "
-                      "be in use from vip: %(vip)s due to error: %(except)s",
+            LOG.error(_LE("Failed to unplug VIP.  Resources may still "
+                          "be in use from vip: %(vip)s due to "
+                          "error: %(except)s"),
                       {'vip': loadbalancer.vip.ip_address, 'except': e})
 
 
@@ -361,7 +311,7 @@ class UnplugVIP(BaseNetworkTask):
         try:
             self.network_driver.unplug_vip(loadbalancer, loadbalancer.vip)
         except Exception:
-            LOG.exception("Unable to unplug vip from load balancer %s",
+            LOG.exception(_LE("Unable to unplug vip from load balancer %s"),
                           loadbalancer.id)
 
 
@@ -382,15 +332,16 @@ class AllocateVIP(BaseNetworkTask):
         """Handle a failure to allocate vip."""
 
         if isinstance(result, failure.Failure):
-            LOG.exception("Unable to allocate VIP")
+            LOG.exception(_LE("Unable to allocate VIP"))
             return
         vip = result
-        LOG.warning("Deallocating vip %s", vip.ip_address)
+        LOG.warning(_LW("Deallocating vip %s"), vip.ip_address)
         try:
             self.network_driver.deallocate_vip(vip)
         except Exception as e:
-            LOG.error("Failed to deallocate VIP.  Resources may still "
-                      "be in use from vip: %(vip)s due to error: %(except)s",
+            LOG.error(_LE("Failed to deallocate VIP.  Resources may still "
+                          "be in use from vip: %(vip)s due to "
+                          "error: %(except)s"),
                       {'vip': vip.ip_address, 'except': e})
 
 
@@ -419,16 +370,6 @@ class UpdateVIP(BaseNetworkTask):
         LOG.debug("Updating VIP of load_balancer %s.", loadbalancer.id)
 
         self.network_driver.update_vip(loadbalancer)
-
-
-class UpdateVIPForDelete(BaseNetworkTask):
-    """Task to update a VIP for listener delete flows."""
-
-    def execute(self, loadbalancer):
-        LOG.debug("Updating VIP for listener delete on load_balancer %s.",
-                  loadbalancer.id)
-
-        self.network_driver.update_vip(loadbalancer, for_delete=True)
 
 
 class GetAmphoraeNetworkConfigs(BaseNetworkTask):
@@ -478,9 +419,9 @@ class PlugPorts(BaseNetworkTask):
 
     def execute(self, amphora, ports):
         for port in ports:
-            LOG.debug('Plugging port ID: %(port_id)s into compute instance: '
-                      '%(compute_id)s.',
-                      {'port_id': port.id, 'compute_id': amphora.compute_id})
+            LOG.debug('Plugging port ID: {port_id} into compute instance: '
+                      '{compute_id}.'.format(port_id=port.id,
+                                             compute_id=amphora.compute_id))
             self.network_driver.plug_port(amphora, port)
 
 
@@ -489,9 +430,9 @@ class PlugVIPPort(BaseNetworkTask):
 
     def execute(self, amphora, amphorae_network_config):
         vrrp_port = amphorae_network_config.get(amphora.id).vrrp_port
-        LOG.debug('Plugging VIP VRRP port ID: %(port_id)s into compute '
-                  'instance: %(compute_id)s.',
-                  {'port_id': vrrp_port.id, 'compute_id': amphora.compute_id})
+        LOG.debug('Plugging VIP VRRP port ID: {port_id} into compute '
+                  'instance: {compute_id}.'.format(
+                      port_id=vrrp_port.id, compute_id=amphora.compute_id))
         self.network_driver.plug_port(amphora, vrrp_port)
 
     def revert(self, result, amphora, amphorae_network_config,
@@ -501,61 +442,15 @@ class PlugVIPPort(BaseNetworkTask):
             vrrp_port = amphorae_network_config.get(amphora.id).vrrp_port
             self.network_driver.unplug_port(amphora, vrrp_port)
         except Exception:
-            LOG.warning('Failed to unplug vrrp port: %(port)s from amphora: '
-                        '%(amp)s', {'port': vrrp_port.id, 'amp': amphora.id})
+            LOG.warning(_LW('Failed to unplug vrrp port: {port} '
+                            'from amphora: {amp}').format(port=vrrp_port.id,
+                                                          amp=amphora.id))
 
 
 class WaitForPortDetach(BaseNetworkTask):
     """Task to wait for the neutron ports to detach from an amphora."""
 
     def execute(self, amphora):
-        LOG.debug('Waiting for ports to detach from amphora: %(amp_id)s.',
-                  {'amp_id': amphora.id})
+        LOG.debug('Waiting for ports to detach from amphora: '
+                  '{amp_id}.'.format(amp_id=amphora.id))
         self.network_driver.wait_for_port_detach(amphora)
-
-
-class ApplyQos(BaseNetworkTask):
-    """Apply Quality of Services to the VIP"""
-
-    def _apply_qos_on_vrrp_ports(self, loadbalancer, amps_data, qos_policy_id,
-                                 is_revert=False, request_qos_id=None):
-        """Call network driver to apply QoS Policy on the vrrp ports."""
-        if not amps_data:
-            amps_data = loadbalancer.amphorae
-        vrrp_port_ids = [amp.vrrp_port_id for amp in amps_data]
-        for port_id in vrrp_port_ids:
-            try:
-                self.network_driver.apply_qos_on_port(qos_policy_id, port_id)
-            except Exception:
-                if not is_revert:
-                    raise
-                else:
-                    LOG.warning('Failed to undo qos policy %(qos_id)s '
-                                'on vrrp port: %(port)s from '
-                                'amphorae: %(amp)s',
-                                {'qos_id': request_qos_id,
-                                 'port': vrrp_port_ids,
-                                 'amp': [amp.id for amp in amps_data]})
-
-    def execute(self, loadbalancer, amps_data=None, update_dict=None):
-        """Apply qos policy on the vrrp ports which are related with vip."""
-        qos_policy_id = loadbalancer.vip.qos_policy_id
-        if not qos_policy_id and (
-            update_dict and (
-                'vip' not in update_dict or
-                'qos_policy_id' not in update_dict['vip'])):
-            return
-        self._apply_qos_on_vrrp_ports(loadbalancer, amps_data, qos_policy_id)
-
-    def revert(self, result, loadbalancer, amps_data=None, update_dict=None,
-               *args, **kwargs):
-        """Handle a failure to apply QoS to VIP"""
-        request_qos_id = loadbalancer.vip.qos_policy_id
-        orig_lb = self.task_utils.get_current_loadbalancer_from_db(
-            loadbalancer.id)
-        orig_qos_id = orig_lb.vip.qos_policy_id
-        if request_qos_id != orig_qos_id:
-            self._apply_qos_on_vrrp_ports(loadbalancer, amps_data, orig_qos_id,
-                                          is_revert=True,
-                                          request_qos_id=request_qos_id)
-        return

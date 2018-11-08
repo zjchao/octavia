@@ -14,7 +14,7 @@
 
 from oslo_log import log as logging
 
-from octavia.amphorae.drivers import driver_base
+from octavia.amphorae.drivers import driver_base as driver_base
 
 LOG = logging.getLogger(__name__)
 
@@ -36,16 +36,6 @@ class NoopManager(object):
     def __init__(self):
         super(NoopManager, self).__init__()
         self.amphoraconfig = {}
-
-    def update_amphora_listeners(self, listeners, amphora_index,
-                                 amphorae, timeout_dict):
-        amphora_id = amphorae[amphora_index].id
-        for listener in listeners:
-            LOG.debug("Amphora noop driver update_amphora_listeners, "
-                      "listener %s, amphora %s, timeouts %s", listener.id,
-                      amphora_id, timeout_dict)
-            self.amphoraconfig[(listener.id, amphora_id)] = (
-                listener, amphora_id, timeout_dict, "update_amp")
 
     def update(self, listener, vip):
         LOG.debug("Amphora %s no-op, update listener %s, vip %s",
@@ -109,18 +99,10 @@ class NoopManager(object):
                                                     'update_amp_cert_file')
 
 
-class NoopAmphoraLoadBalancerDriver(
-    driver_base.AmphoraLoadBalancerDriver,
-        driver_base.VRRPDriverMixin):
+class NoopAmphoraLoadBalancerDriver(driver_base.AmphoraLoadBalancerDriver):
     def __init__(self):
         super(NoopAmphoraLoadBalancerDriver, self).__init__()
         self.driver = NoopManager()
-
-    def update_amphora_listeners(self, listeners, amphora_index,
-                                 amphorae, timeout_dict):
-
-        self.driver.update_amphora_listeners(listeners, amphora_index,
-                                             amphorae, timeout_dict)
 
     def update(self, listener, vip):
 
@@ -162,18 +144,3 @@ class NoopAmphoraLoadBalancerDriver(
     def upload_cert_amp(self, amphora, pem_file):
 
         self.driver.upload_cert_amp(amphora, pem_file)
-
-    def update_vrrp_conf(self, loadbalancer):
-        pass
-
-    def stop_vrrp_service(self, loadbalancer):
-        pass
-
-    def start_vrrp_service(self, loadbalancer):
-        pass
-
-    def reload_vrrp_service(self, loadbalancer):
-        pass
-
-    def get_vrrp_interface(self, amphora):
-        pass

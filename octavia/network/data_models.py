@@ -76,7 +76,7 @@ class Port(data_models.BaseDataModel):
     def __init__(self, id=None, name=None, device_id=None, device_owner=None,
                  mac_address=None, network_id=None, status=None,
                  project_id=None, admin_state_up=None, fixed_ips=None,
-                 network=None, qos_policy_id=None):
+                 network=None):
         self.id = id
         self.name = name
         self.device_id = device_id
@@ -88,13 +88,11 @@ class Port(data_models.BaseDataModel):
         self.admin_state_up = admin_state_up
         self.fixed_ips = fixed_ips or []
         self.network = network
-        self.qos_policy_id = qos_policy_id
 
     def get_subnet_id(self, fixed_ip_address):
         for fixed_ip in self.fixed_ips:
             if fixed_ip.ip_address == fixed_ip_address:
                 return fixed_ip.subnet_id
-        return None
 
 
 class FixedIP(data_models.BaseDataModel):
@@ -103,26 +101,6 @@ class FixedIP(data_models.BaseDataModel):
         self.subnet_id = subnet_id
         self.ip_address = ip_address
         self.subnet = subnet
-
-
-class FloatingIP(data_models.BaseDataModel):
-    def __init__(self, id=None, description=None, project_id=None,
-                 status=None, router_id=None, port_id=None,
-                 floating_network_id=None, floating_ip_address=None,
-                 fixed_ip_address=None, fixed_port_id=None):
-        self.id = id
-        self.description = description
-        self.project_id = project_id
-        self.status = status
-        self.router_id = router_id
-        self.port_id = port_id
-        self.floating_network_id = floating_network_id
-        self.floating_ip_address = floating_ip_address
-        self.fixed_ip_address = fixed_ip_address
-        self.fixed_port_id = fixed_port_id
-
-        # Need to provide this for compatibility in case it is used as a VIP
-        self.network_id = floating_network_id
 
 
 class AmphoraNetworkConfig(data_models.BaseDataModel):
@@ -144,8 +122,3 @@ class HostRoute(data_models.BaseDataModel):
     def __init__(self, nexthop=None, destination=None):
         self.nexthop = nexthop
         self.destination = destination
-
-
-class QosPolicy(data_models.BaseDataModel):
-    def __init__(self, id):
-        self.id = id

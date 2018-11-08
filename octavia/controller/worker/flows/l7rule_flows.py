@@ -40,8 +40,6 @@ class L7RuleFlows(object):
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
         create_l7rule_flow.add(database_tasks.MarkL7RuleActiveInDB(
             requires=constants.L7RULE))
-        create_l7rule_flow.add(database_tasks.MarkL7PolicyActiveInDB(
-            requires=constants.L7POLICY))
         create_l7rule_flow.add(database_tasks.MarkLBAndListenersActiveInDB(
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
 
@@ -65,8 +63,8 @@ class L7RuleFlows(object):
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
         delete_l7rule_flow.add(database_tasks.DeleteL7RuleInDB(
             requires=constants.L7RULE))
-        delete_l7rule_flow.add(database_tasks.MarkL7PolicyActiveInDB(
-            requires=constants.L7POLICY))
+        delete_l7rule_flow.add(database_tasks.MarkL7RuleActiveInDB(
+            requires=constants.L7RULE))
         delete_l7rule_flow.add(database_tasks.MarkLBAndListenersActiveInDB(
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
 
@@ -84,14 +82,16 @@ class L7RuleFlows(object):
                       constants.LOADBALANCER]))
         update_l7rule_flow.add(database_tasks.MarkL7RulePendingUpdateInDB(
             requires=constants.L7RULE))
+        update_l7rule_flow.add(
+            model_tasks.UpdateAttributes(
+                rebind={constants.OBJECT: constants.L7RULE},
+                requires=[constants.UPDATE_DICT]))
         update_l7rule_flow.add(amphora_driver_tasks.ListenersUpdate(
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
         update_l7rule_flow.add(database_tasks.UpdateL7RuleInDB(
             requires=[constants.L7RULE, constants.UPDATE_DICT]))
         update_l7rule_flow.add(database_tasks.MarkL7RuleActiveInDB(
             requires=constants.L7RULE))
-        update_l7rule_flow.add(database_tasks.MarkL7PolicyActiveInDB(
-            requires=constants.L7POLICY))
         update_l7rule_flow.add(database_tasks.MarkLBAndListenersActiveInDB(
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
 

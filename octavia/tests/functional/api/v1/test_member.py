@@ -24,8 +24,7 @@ class TestMember(base.BaseAPITest):
 
     def setUp(self):
         super(TestMember, self).setUp()
-        self.lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()})
+        self.lb = self.create_load_balancer({})
         self.set_lb_status(self.lb.get('id'))
         self.listener = self.create_listener(self.lb.get('id'),
                                              constants.PROTOCOL_HTTP, 80)
@@ -74,8 +73,8 @@ class TestMember(base.BaseAPITest):
         self.set_lb_status(self.lb.get('id'))
         # Original objects didn't have the updated operating status that exists
         # in the DB.
-        api_m_1['operating_status'] = constants.NO_MONITOR
-        api_m_2['operating_status'] = constants.NO_MONITOR
+        api_m_1['operating_status'] = constants.OFFLINE
+        api_m_2['operating_status'] = constants.OFFLINE
         response = self.get(self.members_path)
         response_body = response.json
         self.assertIsInstance(response_body, list)
@@ -124,7 +123,7 @@ class TestMember(base.BaseAPITest):
         api_member = self.create_member(self.lb.get('id'),
                                         self.pool.get('id'),
                                         '10.0.0.1', 80, project_id=pid)
-        self.assertEqual(self.project_id, api_member.get('project_id'))
+        self.assertEqual(pid, api_member.get('project_id'))
 
     def test_create_with_duplicate_id(self):
         member = self.create_member(self.lb.get('id'),
@@ -176,34 +175,8 @@ class TestMember(base.BaseAPITest):
                                             self.listener.get('id'),
                                             constants.ACTIVE, constants.ONLINE)
 
-    def test_create_with_monitor_address_and_port(self):
-        api_member = self.create_member_with_listener(
-            self.lb.get('id'), self.listener.get('id'),
-            self.pool.get('id'), '10.0.0.1', 80,
-            monitor_address='192.0.2.2',
-            monitor_port=9090)
-        self.assertEqual('10.0.0.1', api_member.get('ip_address'))
-        self.assertEqual(80, api_member.get('protocol_port'))
-        self.assertEqual('192.0.2.2', api_member.get('monitor_address'))
-        self.assertEqual(9090, api_member.get('monitor_port'))
-        self.assert_correct_lb_status(self.lb.get('id'),
-                                      constants.PENDING_UPDATE,
-                                      constants.ONLINE)
-        self.assert_correct_listener_status(self.lb.get('id'),
-                                            self.listener.get('id'),
-                                            constants.PENDING_UPDATE,
-                                            constants.ONLINE)
-        self.set_lb_status(self.lb.get('id'))
-        self.assert_correct_lb_status(self.lb.get('id'),
-                                      constants.ACTIVE,
-                                      constants.ONLINE)
-        self.assert_correct_listener_status(self.lb.get('id'),
-                                            self.listener.get('id'),
-                                            constants.ACTIVE, constants.ONLINE)
-
     def test_duplicate_create(self):
-        member = {'ip_address': '10.0.0.1', 'protocol_port': 80,
-                  'project_id': self.project_id}
+        member = {'ip_address': '10.0.0.1', 'protocol_port': 80}
         self.post(self.members_path, member, status=202)
         self.set_lb_status(self.lb.get('id'))
         self.post(self.members_path, member, status=409)
@@ -233,12 +206,6 @@ class TestMember(base.BaseAPITest):
             self.assertEqual('10.0.0.1', response.get('ip_address'))
             self.assertEqual(80, response.get('protocol_port'))
             self.assertEqual(subnet_id, response.get('subnet_id'))
-
-    def test_create_over_quota(self):
-        self.check_quota_met_true_mock.start()
-        self.addCleanup(self.check_quota_met_true_mock.stop)
-        body = {'ip_address': '10.0.0.3', 'protocol_port': 81}
-        self.post(self.members_path, body, status=403)
 
     def test_update(self):
         old_port = 80
@@ -373,8 +340,7 @@ class TestMember(base.BaseAPITest):
         self.put(self.LB_PATH.format(lb_id=self.lb.get('id')),
                  body={'name': 'test_name_change'})
         self.post(self.members_path,
-                  body={'ip_address': '10.0.0.1', 'protocol_port': 80,
-                        'project_id': self.project_id},
+                  body={'ip_address': '10.0.0.1', 'protocol_port': 80},
                   status=409)
 
     def test_update_when_lb_pending_update(self):
@@ -402,11 +368,9 @@ class TestMember(base.BaseAPITest):
                            self.pool.get('id'), ip_address="10.0.0.1",
                            protocol_port=80)
         self.set_lb_status(self.lb.get('id'))
-        self.delete(self.LB_DELETE_CASCADE_PATH.format(
-            lb_id=self.lb.get('id')))
+        self.delete(self.LB_PATH.format(lb_id=self.lb.get('id')))
         self.post(self.members_path,
-                  body={'ip_address': '10.0.0.2', 'protocol_port': 88,
-                        'project_id': self.project_id},
+                  body={'ip_address': '10.0.0.2', 'protocol_port': 88},
                   status=409)
 
     def test_update_when_lb_pending_delete(self):
@@ -414,8 +378,7 @@ class TestMember(base.BaseAPITest):
                                     self.pool.get('id'), ip_address="10.0.0.1",
                                     protocol_port=80)
         self.set_lb_status(self.lb.get('id'))
-        self.delete(self.LB_DELETE_CASCADE_PATH.format(
-            lb_id=self.lb.get('id')))
+        self.delete(self.LB_PATH.format(lb_id=self.lb.get('id')))
         self.put(self.member_path.format(member_id=member.get('id')),
                  body={'protocol_port': 88}, status=409)
 
@@ -424,7 +387,6 @@ class TestMember(base.BaseAPITest):
                                     self.pool.get('id'), ip_address="10.0.0.1",
                                     protocol_port=80)
         self.set_lb_status(self.lb.get('id'))
-        self.delete(self.LB_DELETE_CASCADE_PATH.format(
-            lb_id=self.lb.get('id')))
+        self.delete(self.LB_PATH.format(lb_id=self.lb.get('id')))
         self.delete(self.member_path.format(member_id=member.get('id')),
                     status=409)

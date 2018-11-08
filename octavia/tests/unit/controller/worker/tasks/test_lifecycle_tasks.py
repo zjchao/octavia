@@ -46,7 +46,6 @@ class TestLifecycleTasks(base.TestCase):
         self.MEMBER = mock.MagicMock()
         self.MEMBER_ID = uuidutils.generate_uuid()
         self.MEMBER.id = self.MEMBER_ID
-        self.MEMBERS = [self.MEMBER]
         self.POOL = mock.MagicMock()
         self.POOL_ID = uuidutils.generate_uuid()
         self.POOL.id = self.POOL_ID
@@ -54,11 +53,8 @@ class TestLifecycleTasks(base.TestCase):
         super(TestLifecycleTasks, self).setUp()
 
     @mock.patch('octavia.controller.worker.task_utils.TaskUtils.'
-                'unmark_amphora_health_busy')
-    @mock.patch('octavia.controller.worker.task_utils.TaskUtils.'
                 'mark_amphora_status_error')
-    def test_AmphoraIDToErrorOnRevertTask(self, mock_amp_status_error,
-                                          mock_amp_health_busy):
+    def test_AmphoraIDToErrorOnRevertTask(self, mock_amp_status_error):
 
         amp_id_to_error_on_revert = (lifecycle_tasks.
                                      AmphoraIDToErrorOnRevertTask())
@@ -72,14 +68,10 @@ class TestLifecycleTasks(base.TestCase):
         amp_id_to_error_on_revert.revert(self.AMPHORA_ID)
 
         mock_amp_status_error.assert_called_once_with(self.AMPHORA_ID)
-        self.assertFalse(mock_amp_health_busy.called)
 
     @mock.patch('octavia.controller.worker.task_utils.TaskUtils.'
-                'unmark_amphora_health_busy')
-    @mock.patch('octavia.controller.worker.task_utils.TaskUtils.'
                 'mark_amphora_status_error')
-    def test_AmphoraToErrorOnRevertTask(self, mock_amp_status_error,
-                                        mock_amp_health_busy):
+    def test_AmphoraToErrorOnRevertTask(self, mock_amp_status_error):
 
         amp_to_error_on_revert = lifecycle_tasks.AmphoraToErrorOnRevertTask()
 
@@ -92,7 +84,6 @@ class TestLifecycleTasks(base.TestCase):
         amp_to_error_on_revert.revert(self.AMPHORA)
 
         mock_amp_status_error.assert_called_once_with(self.AMPHORA_ID)
-        self.assertFalse(mock_amp_health_busy.called)
 
     @mock.patch('octavia.controller.worker.task_utils.TaskUtils.'
                 'mark_health_mon_prov_status_error')
@@ -294,29 +285,25 @@ class TestLifecycleTasks(base.TestCase):
                 'mark_loadbalancer_prov_status_active')
     @mock.patch('octavia.controller.worker.task_utils.TaskUtils.'
                 'mark_listener_prov_status_active')
-    @mock.patch('octavia.controller.worker.task_utils.TaskUtils.'
-                'mark_pool_prov_status_active')
     def test_MemberToErrorOnRevertTask(
             self,
-            mock_pool_prov_status_active,
             mock_listener_prov_status_active,
             mock_loadbalancer_prov_status_active,
             mock_member_prov_status_error):
+
         member_to_error_on_revert = lifecycle_tasks.MemberToErrorOnRevertTask()
 
         # Execute
         member_to_error_on_revert.execute(self.MEMBER,
                                           self.LISTENERS,
-                                          self.LOADBALANCER,
-                                          self.POOL)
+                                          self.LOADBALANCER)
 
         self.assertFalse(mock_member_prov_status_error.called)
 
         # Revert
         member_to_error_on_revert.revert(self.MEMBER,
                                          self.LISTENERS,
-                                         self.LOADBALANCER,
-                                         self.POOL)
+                                         self.LOADBALANCER)
 
         mock_member_prov_status_error.assert_called_once_with(
             self.MEMBER_ID)
@@ -324,48 +311,6 @@ class TestLifecycleTasks(base.TestCase):
             self.LOADBALANCER_ID)
         mock_listener_prov_status_active.assert_called_once_with(
             self.LISTENER_ID)
-        mock_pool_prov_status_active.assert_called_once_with(
-            self.POOL_ID)
-
-    @mock.patch('octavia.controller.worker.task_utils.TaskUtils.'
-                'mark_member_prov_status_error')
-    @mock.patch('octavia.controller.worker.task_utils.TaskUtils.'
-                'mark_loadbalancer_prov_status_active')
-    @mock.patch('octavia.controller.worker.task_utils.TaskUtils.'
-                'mark_listener_prov_status_active')
-    @mock.patch('octavia.controller.worker.task_utils.TaskUtils.'
-                'mark_pool_prov_status_active')
-    def test_MembersToErrorOnRevertTask(
-            self,
-            mock_pool_prov_status_active,
-            mock_listener_prov_status_active,
-            mock_loadbalancer_prov_status_active,
-            mock_member_prov_status_error):
-        members_to_error_on_revert = (
-            lifecycle_tasks.MembersToErrorOnRevertTask())
-
-        # Execute
-        members_to_error_on_revert.execute(self.MEMBERS,
-                                           self.LISTENERS,
-                                           self.LOADBALANCER,
-                                           self.POOL)
-
-        self.assertFalse(mock_member_prov_status_error.called)
-
-        # Revert
-        members_to_error_on_revert.revert(self.MEMBERS,
-                                          self.LISTENERS,
-                                          self.LOADBALANCER,
-                                          self.POOL)
-
-        mock_member_prov_status_error.assert_called_once_with(
-            self.MEMBER_ID)
-        mock_loadbalancer_prov_status_active.assert_called_once_with(
-            self.LOADBALANCER_ID)
-        mock_listener_prov_status_active.assert_called_once_with(
-            self.LISTENER_ID)
-        mock_pool_prov_status_active.assert_called_once_with(
-            self.POOL_ID)
 
     @mock.patch('octavia.controller.worker.task_utils.TaskUtils.'
                 'mark_pool_prov_status_error')

@@ -22,8 +22,7 @@ class TestHealthMonitor(base.BaseAPITest):
 
     def setUp(self):
         super(TestHealthMonitor, self).setUp()
-        self.lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()})
+        self.lb = self.create_load_balancer({})
         self.set_lb_status(self.lb.get('id'))
         self.listener = self.create_listener(self.lb.get('id'),
                                              constants.PROTOCOL_HTTP, 80)
@@ -100,11 +99,6 @@ class TestHealthMonitor(base.BaseAPITest):
         self.assertEqual(1, api_hm.get('timeout'))
         self.assertEqual(1, api_hm.get('fall_threshold'))
         self.assertEqual(1, api_hm.get('rise_threshold'))
-        # Verify optional field defaults
-        self.assertEqual('GET', api_hm.get('http_method'))
-        self.assertEqual('/', api_hm.get('url_path'))
-        self.assertEqual('200', api_hm.get('expected_codes'))
-
         self.assert_correct_lb_status(self.lb.get('id'),
                                       constants.ACTIVE,
                                       constants.ONLINE)
@@ -118,16 +112,7 @@ class TestHealthMonitor(base.BaseAPITest):
                                             self.pool.get('id'),
                                             constants.HEALTH_MONITOR_HTTP,
                                             1, 1, 1, 1, project_id=pid)
-        self.assertEqual(self.project_id, api_hm.get('project_id'))
-
-    def test_create_over_quota(self):
-        self.check_quota_met_true_mock.start()
-        self.addCleanup(self.check_quota_met_true_mock.stop)
-        self.post(self.hm_path,
-                  body={'type': constants.HEALTH_MONITOR_HTTP,
-                        'delay': 1, 'timeout': 1, 'fall_threshold': 1,
-                        'rise_threshold': 1, 'project_id': self.project_id},
-                  status=403)
+        self.assertEqual(pid, api_hm.get('project_id'))
 
     def test_bad_create(self):
         hm_json = {'name': 'test1'}
@@ -266,11 +251,10 @@ class TestHealthMonitor(base.BaseAPITest):
     def test_create_when_lb_pending_update(self):
         self.put(self.LB_PATH.format(lb_id=self.lb.get('id')),
                  body={'name': 'test_name_change'})
-        self.post(self.hm_path,
-                  body={'type': constants.HEALTH_MONITOR_HTTP,
-                        'delay': 1, 'timeout': 1, 'fall_threshold': 1,
-                        'rise_threshold': 1, 'project_id': self.project_id},
-                  status=409)
+        self.post(self.hm_path, body={'type': constants.HEALTH_MONITOR_HTTP,
+                                      'delay': 1, 'timeout': 1,
+                                      'fall_threshold': 1,
+                                      'rise_threshold': 1}, status=409)
 
     def test_update_when_lb_pending_update(self):
         self.create_health_monitor(self.lb.get('id'), self.pool.get('id'),
@@ -289,26 +273,22 @@ class TestHealthMonitor(base.BaseAPITest):
         self.delete(self.hm_path, status=409)
 
     def test_create_when_lb_pending_delete(self):
-        self.delete(self.LB_DELETE_CASCADE_PATH.format(
-            lb_id=self.lb.get('id')))
-        self.post(self.hm_path,
-                  body={'type': constants.HEALTH_MONITOR_HTTP,
-                        'delay': 1, 'timeout': 1, 'fall_threshold': 1,
-                        'rise_threshold': 1, 'project_id': self.project_id},
-                  status=409)
+        self.delete(self.LB_PATH.format(lb_id=self.lb.get('id')))
+        self.post(self.hm_path, body={'type': constants.HEALTH_MONITOR_HTTP,
+                                      'delay': 1, 'timeout': 1,
+                                      'fall_threshold': 1,
+                                      'rise_threshold': 1}, status=409)
 
     def test_update_when_lb_pending_delete(self):
         self.create_health_monitor(self.lb.get('id'), self.pool.get('id'),
                                    constants.HEALTH_MONITOR_HTTP, 1, 1, 1, 1)
         self.set_lb_status(self.lb.get('id'))
-        self.delete(self.LB_DELETE_CASCADE_PATH.format(
-            lb_id=self.lb.get('id')))
+        self.delete(self.LB_PATH.format(lb_id=self.lb.get('id')))
         self.put(self.hm_path, body={'rise_threshold': 2}, status=409)
 
     def test_delete_when_lb_pending_delete(self):
         self.create_health_monitor(self.lb.get('id'), self.pool.get('id'),
                                    constants.HEALTH_MONITOR_HTTP, 1, 1, 1, 1)
         self.set_lb_status(self.lb.get('id'))
-        self.delete(self.LB_DELETE_CASCADE_PATH.format(
-            lb_id=self.lb.get('id')))
+        self.delete(self.LB_PATH.format(lb_id=self.lb.get('id')))
         self.delete(self.hm_path, status=409)

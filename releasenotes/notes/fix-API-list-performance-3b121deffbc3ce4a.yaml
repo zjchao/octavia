@@ -1,5 +1,0 @@
----
-fixes:
-  - |
-    Fixed a performance regression in the Octavia v2 API when using the
-    "list" APIs.

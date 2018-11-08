@@ -12,9 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import random
-import string
-
 from novaclient import exceptions as nova_exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -24,11 +21,15 @@ from octavia.common import constants
 from octavia.common import data_models as models
 from octavia.common import exceptions
 from octavia.compute import compute_base
-from octavia.i18n import _
+from octavia.i18n import _LE, _LW
 
 LOG = logging.getLogger(__name__)
 
 CONF = cfg.CONF
+CONF.import_group('glance', 'octavia.common.config')
+CONF.import_group('keystone_authtoken', 'octavia.common.config')
+CONF.import_group('networking', 'octavia.common.config')
+CONF.import_group('nova', 'octavia.common.config')
 
 
 def _extract_amp_image_id_by_tag(client, image_tag, image_owner):
@@ -51,17 +52,20 @@ def _extract_amp_image_id_by_tag(client, image_tag, image_owner):
     image_id = images[0]['id']
     num_images = len(images)
     if num_images > 1:
-        LOG.warning("A single Glance image should be tagged with %(tag)s tag, "
-                    "but at least two were found. Using %(image_id)s.",
-                    {'tag': image_tag, 'image_id': image_id})
+        LOG.warning(
+            _LW("A single Glance image should be tagged with %(tag)s tag, "
+                "but at least two were found. Using %(image_id)s."),
+            {'tag': image_tag, 'image_id': image_id}
+        )
     return image_id
 
 
 def _get_image_uuid(client, image_id, image_tag, image_owner):
     if image_id:
         if image_tag:
-            LOG.warning("Both amp_image_id and amp_image_tag options defined. "
-                        "Using the amp_image_id.")
+            LOG.warning(
+                _LW("Both amp_image_id and amp_image_tag options defined. "
+                    "Using the amp_image_id."))
         return image_id
 
     return _extract_amp_image_id_by_tag(client, image_tag, image_owner)
@@ -105,21 +109,18 @@ class VirtualMachineManager(compute_base.ComputeBase):
         :param network_ids: Network IDs to include on virtual machine
         :param port_ids: Port IDs to include on virtual machine
         :param config_drive_files:  An optional dict of files to overwrite on
-                                    the server upon boot. Keys are file names
-                                    (i.e. /etc/passwd) and values are the file
-                                    contents (either as a string or as a
-                                    file-like object). A maximum of five
-                                    entries is allowed, and each file must be
-                                    10k or less.
+        the server upon boot. Keys are file names (i.e. /etc/passwd)
+        and values are the file contents (either as a string or as
+        a file-like object). A maximum of five entries is allowed,
+        and each file must be 10k or less.
         :param user_data: Optional user data to pass to be exposed by the
-                          metadata server this can be a file type object as
-                          well or a string
+        metadata server this can be a file type object as well or
+        a string
         :param server_group_id: Optional server group id(uuid) which is used
-                                for anti_affinity feature
+        for anti_affinity feature
 
         :raises ComputeBuildException: if nova failed to build virtual machine
         :returns: UUID of amphora
-
         '''
 
         try:
@@ -136,14 +137,6 @@ class VirtualMachineManager(compute_base.ComputeBase):
 
             image_id = _get_image_uuid(
                 self._glance_client, image_id, image_tag, image_owner)
-
-            if CONF.nova.random_amphora_name_length:
-                r = random.SystemRandom()
-                name = "a{}".format("".join(
-                    [r.choice(string.ascii_uppercase + string.digits)
-                     for i in range(CONF.nova.random_amphora_name_length - 1)]
-                ))
-
             amphora = self.manager.create(
                 name=name, image=image_id, flavor=amphora_flavor,
                 key_name=key_name, security_groups=sec_groups,
@@ -151,14 +144,13 @@ class VirtualMachineManager(compute_base.ComputeBase):
                 files=config_drive_files,
                 userdata=user_data,
                 config_drive=True,
-                scheduler_hints=server_group,
-                availability_zone=CONF.nova.availability_zone
+                scheduler_hints=server_group
             )
 
             return amphora.id
-        except Exception as e:
-            LOG.exception("Nova failed to build the instance due to: %s", e)
-            raise exceptions.ComputeBuildException(fault=e)
+        except Exception:
+            LOG.exception(_LE("Error building nova virtual machine."))
+            raise exceptions.ComputeBuildException()
 
     def delete(self, compute_id):
         '''Delete a virtual machine.
@@ -168,10 +160,10 @@ class VirtualMachineManager(compute_base.ComputeBase):
         try:
             self.manager.delete(server=compute_id)
         except nova_exceptions.NotFound:
-            LOG.warning("Nova instance with id: %s not found. "
-                        "Assuming already deleted.", compute_id)
+            LOG.warning(_LW("Nova instance with id: %s not found. "
+                            "Assuming already deleted."), compute_id)
         except Exception:
-            LOG.exception("Error deleting nova virtual machine.")
+            LOG.exception(_LE("Error deleting nova virtual machine."))
             raise exceptions.ComputeDeleteException()
 
     def status(self, compute_id):
@@ -181,11 +173,11 @@ class VirtualMachineManager(compute_base.ComputeBase):
         :returns: constant of amphora status
         '''
         try:
-            amphora, fault = self.get_amphora(compute_id)
+            amphora = self.get_amphora(compute_id)
             if amphora and amphora.status == 'ACTIVE':
                 return constants.UP
         except Exception:
-            LOG.exception("Error retrieving nova virtual machine status.")
+            LOG.exception(_LE("Error retrieving nova virtual machine status."))
             raise exceptions.ComputeStatusException()
         return constants.DOWN
 
@@ -194,13 +186,12 @@ class VirtualMachineManager(compute_base.ComputeBase):
 
         :param amphora_id: virtual machine UUID
         :returns: an amphora object
-        :returns: fault message or None
         '''
         # utilize nova client ServerManager 'get' method to retrieve info
         try:
             amphora = self.manager.get(compute_id)
         except Exception:
-            LOG.exception("Error retrieving nova virtual machine.")
+            LOG.exception(_LE("Error retrieving nova virtual machine."))
             raise exceptions.ComputeGetException()
         return self._translate_amphora(amphora)
 
@@ -209,14 +200,11 @@ class VirtualMachineManager(compute_base.ComputeBase):
 
         :param nova_response: JSON response from nova
         :returns: an amphora object
-        :returns: fault message or None
         '''
         # Extract interfaces of virtual machine to populate desired amphora
         # fields
 
         lb_network_ip = None
-        availability_zone = None
-        fault = None
 
         try:
             inf_list = nova_response.interface_list()
@@ -231,25 +219,20 @@ class VirtualMachineManager(compute_base.ComputeBase):
                 if is_boot_network or no_boot_networks:
                     lb_network_ip = interface.fixed_ips[0]['ip_address']
                     break
-            try:
-                availability_zone = getattr(
-                    nova_response, 'OS-EXT-AZ:availability_zone')
-            except AttributeError:
-                LOG.info('No availability zone listed for server %s',
-                         nova_response.id)
+                elif net_id == CONF.controller_worker.amp_network:
+                    # TODO(ptoohill) deprecated, remove this block when ready..
+                    lb_network_ip = interface.fixed_ips[0]['ip_address']
+                    break
         except Exception:
             LOG.debug('Extracting virtual interfaces through nova '
                       'os-interfaces extension failed.')
 
-        fault = getattr(nova_response, 'fault', None)
         response = models.Amphora(
             compute_id=nova_response.id,
             status=nova_response.status,
-            lb_network_ip=lb_network_ip,
-            cached_zone=availability_zone,
-            image_id=nova_response.image.get("id")
+            lb_network_ip=lb_network_ip
         )
-        return response, fault
+        return response
 
     def create_server_group(self, name, policy):
         """Create a server group object
@@ -265,7 +248,7 @@ class VirtualMachineManager(compute_base.ComputeBase):
             server_group_obj = self.server_groups.create(**kwargs)
             return server_group_obj
         except Exception:
-            LOG.exception("Error create server group instance.")
+            LOG.exception(_LE("Error create server group instance."))
             raise exceptions.ServerGroupObjectCreateException()
 
     def delete_server_group(self, server_group_id):
@@ -278,51 +261,8 @@ class VirtualMachineManager(compute_base.ComputeBase):
             self.server_groups.delete(server_group_id)
 
         except nova_exceptions.NotFound:
-            LOG.warning("Server group instance with id: %s not found. "
-                        "Assuming already deleted.", server_group_id)
+            LOG.warning(_LW("Server group instance with id: %s not found. "
+                            "Assuming already deleted."), server_group_id)
         except Exception:
-            LOG.exception("Error delete server group instance.")
+            LOG.exception(_LE("Error delete server group instance."))
             raise exceptions.ServerGroupObjectDeleteException()
-
-    def attach_network_or_port(self, compute_id, network_id, ip_address=None,
-                               port_id=None):
-        """Attaching a port or a network to an existing amphora
-
-        :param compute_id: id of an amphora in the compute service
-        :param network_id: id of a network
-        :param ip_address: ip address to attempt to be assigned to interface
-        :param port_id: id of the neutron port
-        :return: nova interface instance
-        :raises: Exception
-        """
-        try:
-            interface = self.manager.interface_attach(
-                server=compute_id, net_id=network_id, fixed_ip=ip_address,
-                port_id=port_id)
-        except Exception:
-            message = _('Error attaching network {network_id} with ip '
-                        '{ip_address} and port {port} to amphora '
-                        '(compute_id: {compute_id}) ').format(
-                            compute_id=compute_id,
-                            network_id=network_id,
-                            ip_address=ip_address,
-                            port=port_id)
-            LOG.error(message)
-            raise
-        return interface
-
-    def detach_port(self, compute_id, port_id):
-        """Detaches a port from an existing amphora.
-
-        :param compute_id: id of an amphora in the compute service
-        :param port_id: id of the port
-        :return: None
-        """
-        try:
-            self.manager.interface_detach(server=compute_id,
-                                          port_id=port_id)
-        except Exception:
-            LOG.error('Error detaching port {port_id} from amphora '
-                      'with compute ID {compute_id}. '
-                      'Skipping.'.format(port_id=port_id,
-                                         compute_id=compute_id))

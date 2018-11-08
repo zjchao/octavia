@@ -14,7 +14,6 @@
 #
 
 import concurrent.futures
-
 import mock
 from oslo_config import cfg
 from oslo_config import fixture as oslo_fixture
@@ -36,7 +35,6 @@ class TestBaseTaskFlowEngine(base.TestCase):
         conf = oslo_fixture.Config(cfg.CONF)
         conf.config(group="task_flow", max_workers=MAX_WORKERS)
         conf.config(group="task_flow", engine='TESTENGINE')
-        conf.config(group="task_flow", disable_revert=True)
         super(TestBaseTaskFlowEngine, self).setUp()
 
     @mock.patch('concurrent.futures.ThreadPoolExecutor',
@@ -60,9 +58,8 @@ class TestBaseTaskFlowEngine(base.TestCase):
 
         tf_engines.load.assert_called_once_with(
             'TEST',
-            engine='TESTENGINE',
-            executor='TESTEXECUTOR',
-            never_resolve=True)
+            engine_conf='TESTENGINE',
+            executor='TESTEXECUTOR')
 
         _engine_mock.compile.assert_called_once_with()
         _engine_mock.prepare.assert_called_once_with()

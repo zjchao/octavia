@@ -12,17 +12,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import contextlib
-import time
-
-from sqlalchemy.sql.expression import select
-
 from oslo_config import cfg
 from oslo_db.sqlalchemy import session as db_session
-from oslo_log import log as logging
-from oslo_utils import excutils
 
-LOG = logging.getLogger(__name__)
 _FACADE = None
 
 
@@ -38,36 +30,7 @@ def get_engine():
     return facade.get_engine()
 
 
-def get_session(expire_on_commit=True, autocommit=True):
+def get_session(expire_on_commit=True):
     """Helper method to grab session."""
     facade = _create_facade_lazily()
-    return facade.get_session(expire_on_commit=expire_on_commit,
-                              autocommit=autocommit)
-
-
-@contextlib.contextmanager
-def get_lock_session():
-    """Context manager for using a locking (not auto-commit) session."""
-    lock_session = get_session(autocommit=False)
-    try:
-        yield lock_session
-        lock_session.commit()
-    except Exception:
-        with excutils.save_and_reraise_exception():
-            lock_session.rollback()
-
-
-def wait_for_connection(exit_event):
-    """Helper method to wait for DB connection"""
-    down = True
-    while down and not exit_event.is_set():
-        try:
-            LOG.debug('Trying to re-establish connection to database.')
-            get_engine().scalar(select([1]))
-            down = False
-            LOG.debug('Connection to database re-established.')
-        except Exception:
-            retry_interval = cfg.CONF.database.retry_interval
-            LOG.exception('Connection to database failed. Retrying in %s '
-                          'seconds.', retry_interval)
-            time.sleep(retry_interval)
+    return facade.get_session(expire_on_commit=expire_on_commit)

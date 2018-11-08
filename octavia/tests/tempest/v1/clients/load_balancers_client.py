@@ -15,7 +15,6 @@
 from oslo_serialization import jsonutils
 from six.moves.urllib import parse
 from tempest.lib.common import rest_client
-from tempest.lib import exceptions as tempest_exceptions
 
 
 class LoadBalancersClient(rest_client.RestClient):
@@ -24,8 +23,6 @@ class LoadBalancersClient(rest_client.RestClient):
     _LOAD_BALANCERS_URL = "v1/loadbalancers"
     _LOAD_BALANCER_URL = "{base_url}/{{lb_id}}".format(
         base_url=_LOAD_BALANCERS_URL)
-    _LOAD_BALANCER_CASCADE_DELETE_URL = "{lb_url}/delete_cascade".format(
-        lb_url=_LOAD_BALANCER_URL)
 
     def list_load_balancers(self, params=None):
         """List all load balancers."""
@@ -56,15 +53,6 @@ class LoadBalancersClient(rest_client.RestClient):
         self.expected_success(202, resp.status)
         return rest_client.ResponseBody(resp, body)
 
-    def create_load_balancer_graph(self, lbgraph):
-        """Create a load balancer graph build."""
-        url = self._LOAD_BALANCERS_URL
-        post_body = jsonutils.dumps(lbgraph)
-        resp, body = self.post(url, post_body)
-        body = jsonutils.loads(body)
-        self.expected_success(202, resp.status)
-        return rest_client.ResponseBody(resp, body)
-
     def update_load_balancer(self, lb_id, **kwargs):
         """Update a load balancer build."""
         url = self._LOAD_BALANCER_URL.format(lb_id=lb_id)
@@ -79,23 +67,4 @@ class LoadBalancersClient(rest_client.RestClient):
         url = self._LOAD_BALANCER_URL.format(lb_id=lb_id)
         resp, body = self.delete(url)
         self.expected_success(202, resp.status)
-        return rest_client.ResponseBody(resp, body)
-
-    def delete_load_balancer_cascade(self, lb_id):
-        """Delete an existing load balancer (cascading)."""
-        url = self._LOAD_BALANCER_CASCADE_DELETE_URL.format(lb_id=lb_id)
-        resp, body = self.delete(url)
-        self.expected_success(202, resp.status)
-        return rest_client.ResponseBody(resp, body)
-
-    def create_load_balancer_over_quota(self, **kwargs):
-        """Attempt to build a load balancer over quota."""
-        url = self._LOAD_BALANCERS_URL
-        post_body = jsonutils.dumps(kwargs)
-        try:
-            resp, body = self.post(url, post_body)
-        except tempest_exceptions.Forbidden:
-            # This is what we expect to happen
-            return
-        assert resp.status == 403, "Expected over quota 403 response"
         return rest_client.ResponseBody(resp, body)

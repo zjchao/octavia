@@ -13,8 +13,7 @@
 #    under the License.
 
 from __future__ import with_statement
-
-import sys
+from logging import config as logging_config
 
 from alembic import context
 from sqlalchemy import create_engine
@@ -22,12 +21,11 @@ from sqlalchemy import pool
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
-try:
-    octavia_config = config.octavia_config
-except AttributeError:
-    print("Error: Please use the octavia-db-manage command for octavia"
-          " alembic actions.")
-    sys.exit(1)
+octavia_config = config.octavia_config
+
+# Interpret the config file for Python logging.
+# This line sets up loggers basically.
+logging_config.fileConfig(config.config_file_name)
 
 # add your model's MetaData object here
 # for 'autogenerate' support

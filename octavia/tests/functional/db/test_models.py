@@ -29,7 +29,6 @@ class ModelTestMixin(object):
     FAKE_IP = '10.0.0.1'
     FAKE_UUID_1 = uuidutils.generate_uuid()
     FAKE_UUID_2 = uuidutils.generate_uuid()
-    FAKE_AZ = 'zone1'
 
     def _insert(self, session, model_cls, model_kwargs):
         with session.begin():
@@ -58,8 +57,7 @@ class ModelTestMixin(object):
                   'bytes_in': 0,
                   'bytes_out': 0,
                   'active_connections': 0,
-                  'total_connections': 0,
-                  'request_errors': 0}
+                  'total_connections': 0}
         kwargs.update(overrides)
         return self._insert(session, models.ListenerStatistics, kwargs)
 
@@ -68,7 +66,6 @@ class ModelTestMixin(object):
                   'id': self.FAKE_UUID_1,
                   'protocol': constants.PROTOCOL_HTTP,
                   'lb_algorithm': constants.LB_ALGORITHM_LEAST_CONNECTIONS,
-                  'provisioning_status': constants.ACTIVE,
                   'operating_status': constants.ONLINE,
                   'enabled': True}
         kwargs.update(overrides)
@@ -82,16 +79,13 @@ class ModelTestMixin(object):
         return self._insert(session, models.SessionPersistence, kwargs)
 
     def create_health_monitor(self, session, pool_id, **overrides):
-        kwargs = {'id': pool_id,
-                  'pool_id': pool_id,
+        kwargs = {'pool_id': pool_id,
                   'type': constants.HEALTH_MONITOR_HTTP,
                   'delay': 1,
                   'timeout': 1,
                   'fall_threshold': 1,
                   'rise_threshold': 1,
                   'enabled': True,
-                  'operating_status': constants.ONLINE,
-                  'provisioning_status': constants.ACTIVE,
                   'project_id': self.FAKE_UUID_1}
         kwargs.update(overrides)
         return self._insert(session, models.HealthMonitor, kwargs)
@@ -102,10 +96,8 @@ class ModelTestMixin(object):
                   'pool_id': pool_id,
                   'ip_address': '10.0.0.1',
                   'protocol_port': 80,
-                  'provisioning_status': constants.ACTIVE,
                   'operating_status': constants.ONLINE,
-                  'enabled': True,
-                  'backup': False}
+                  'enabled': True}
         kwargs.update(overrides)
         return self._insert(session, models.Member, kwargs)
 
@@ -140,8 +132,7 @@ class ModelTestMixin(object):
                   'ha_port_id': self.FAKE_UUID_2,
                   'lb_network_ip': self.FAKE_IP,
                   'cert_expiration': datetime.datetime.utcnow(),
-                  'cert_busy': False,
-                  'cached_zone': self.FAKE_AZ}
+                  'cert_busy': False}
         kwargs.update(overrides)
         return self._insert(session, models.Amphora, kwargs)
 
@@ -157,8 +148,6 @@ class ModelTestMixin(object):
                   'listener_id': listener_id,
                   'action': constants.L7POLICY_ACTION_REJECT,
                   'position': 1,
-                  'provisioning_status': constants.ACTIVE,
-                  'operating_status': constants.ONLINE,
                   'enabled': True}
         kwargs.update(overrides)
         return self._insert(session, models.L7Policy, kwargs)
@@ -168,10 +157,7 @@ class ModelTestMixin(object):
                   'l7policy_id': l7policy_id,
                   'type': constants.L7RULE_TYPE_PATH,
                   'compare_type': constants.L7RULE_COMPARE_TYPE_STARTS_WITH,
-                  'value': '/api',
-                  'provisioning_status': constants.ACTIVE,
-                  'operating_status': constants.ONLINE,
-                  'enabled': True}
+                  'value': '/api'}
         kwargs.update(overrides)
         return self._insert(session, models.L7Rule, kwargs)
 
@@ -335,17 +321,6 @@ class ListenerModelTest(base.OctaviaDBTestBase, ModelTestMixin):
         self.assertIsNotNone(listener.created_at)
         self.assertIsNone(listener.updated_at)
 
-    def test_create_with_timeouts(self):
-        timeouts = {
-            'timeout_client_data': 1,
-            'timeout_member_connect': 2,
-            'timeout_member_data': constants.MIN_TIMEOUT,
-            'timeout_tcp_inspect': constants.MAX_TIMEOUT,
-        }
-        listener = self.create_listener(self.session, **timeouts)
-        for item in timeouts:
-            self.assertEqual(timeouts[item], getattr(listener, item))
-
     def test_update(self):
         listener = self.create_listener(self.session)
         self.assertIsNone(listener.updated_at)
@@ -356,24 +331,6 @@ class ListenerModelTest(base.OctaviaDBTestBase, ModelTestMixin):
             models.Listener).filter_by(id=listener_id).first()
         self.assertEqual('test1', new_listener.name)
         self.assertIsNotNone(new_listener.updated_at)
-
-    def test_update_with_timeouts(self):
-        listener = self.create_listener(self.session)
-        listener_id = listener.id
-
-        timeouts = {
-            'timeout_client_data': 1,
-            'timeout_member_connect': 2,
-            'timeout_member_data': 3,
-            'timeout_tcp_inspect': 4,
-        }
-
-        for item in timeouts:
-            setattr(listener, item, timeouts[item])
-        new_listener = self.session.query(
-            models.Listener).filter_by(id=listener_id).first()
-        for item in timeouts:
-            self.assertEqual(timeouts[item], getattr(new_listener, item))
 
     def test_delete(self):
         listener = self.create_listener(self.session)
@@ -434,13 +391,6 @@ class ListenerStatisticsModelTest(base.OctaviaDBTestBase, ModelTestMixin):
     def test_create(self):
         self.create_listener_statistics(self.session, self.listener.id,
                                         self.amphora.id)
-
-    def test_create_with_negative_int(self):
-        overrides = {'bytes_in': -1}
-        self.assertRaises(ValueError,
-                          self.create_listener_statistics,
-                          self.session, self.listener.id,
-                          self.amphora.id, **overrides)
 
     def test_update(self):
         stats = self.create_listener_statistics(self.session, self.listener.id,

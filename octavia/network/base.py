@@ -63,6 +63,10 @@ class SubnetNotFound(NetworkException):
     pass
 
 
+class VIPConfigurationNotFound(NetworkException):
+    pass
+
+
 class AmphoraNotFound(NetworkException):
     pass
 
@@ -72,10 +76,6 @@ class PluggedVIPNotFound(NetworkException):
 
 
 class TimeoutException(NetworkException):
-    pass
-
-
-class QosPolicyNotFound(NetworkException):
     pass
 
 
@@ -176,7 +176,7 @@ class AbstractNetworkDriver(object):
         :return: [octavia.network.data_models.Instance]
         """
 
-    def update_vip(self, load_balancer, for_delete):
+    def update_vip(self, load_balancer):
         """Hook for the driver to update the VIP information.
 
         This method will be called upon the change of a load_balancer
@@ -185,8 +185,6 @@ class AbstractNetworkDriver(object):
         state of the passed in load_balancer.
 
         :param load_balancer: octavia.common.data_models.LoadBalancer instance
-        :param for_delete: Boolean indicating if this update is for a delete
-        :raises: MissingVIPSecurityGroup
         :return: None
         """
         pass
@@ -273,10 +271,10 @@ class AbstractNetworkDriver(object):
         pass
 
     @abc.abstractmethod
-    def plug_port(self, amphora, port):
+    def plug_port(self, compute_id, port):
         """Plug a neutron port in to a compute instance
 
-        :param amphora: amphora object to plug the port into
+        :param compute_id: id of an amphora in the compute service
         :param port: port to plug into the compute instance
         :return: None
         :raises: PlugNetworkException, AmphoraNotFound, NetworkNotFound
@@ -295,11 +293,12 @@ class AbstractNetworkDriver(object):
         means the driver is responsible for providing data that is appropriate
         for the amphora network configurations.
 
-        Example return: {<amphora.id>: <AmphoraNetworkConfig>}
+        Example return:
+        {<amphora.id>: <AmphoraNetworkConfig>}
 
         :param load_balancer: The load_balancer configuration
         :return: dict of octavia.network.data_models.AmphoraNetworkConfig
-                 keyed off of the amphora id the config is associated with.
+        keyed off of the amphora id the config is associated with.
         :raises: NotFound, NetworkNotFound, SubnetNotFound, PortNotFound
         """
         pass

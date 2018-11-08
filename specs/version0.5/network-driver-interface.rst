@@ -20,7 +20,7 @@ Problem description
 ===================
 
 There is a need to define a generic interface for a networking service.  An
-Octavia controller should not know what networking infrastructure is being used
+Octavia controller should not know what networking infrastucture is being used
 underneath.  It should only know an interface.  This interface is needed to
 support differing networking infrastructures.
 
@@ -134,6 +134,7 @@ New Exceptions defined in the octavia.network package:
 * PortNotFound
 * SubnetNotFound
 * NetworkNotFound
+* VIPConfigurationNotFound
 * AmphoraNotFound
 
 
@@ -180,7 +181,7 @@ class AbstractNetworkDriver
     * Removes any resources that reserved this virtual ip.
     * vip = VIP instance
     * returns None
-    * raises DeallocateVIPException, VIPInUse
+    * raises DeallocateVIPException, VIPInUse, VIPConfigurationNotFound
 
 * plug_network(compute_id, network_id, ip_address=None)
 

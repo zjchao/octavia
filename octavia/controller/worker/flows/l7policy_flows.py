@@ -63,6 +63,8 @@ class L7PolicyFlows(object):
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
         delete_l7policy_flow.add(database_tasks.DeleteL7PolicyInDB(
             requires=constants.L7POLICY))
+        delete_l7policy_flow.add(database_tasks.MarkL7PolicyActiveInDB(
+            requires=constants.L7POLICY))
         delete_l7policy_flow.add(database_tasks.MarkLBAndListenersActiveInDB(
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
 
@@ -80,6 +82,10 @@ class L7PolicyFlows(object):
                       constants.LOADBALANCER]))
         update_l7policy_flow.add(database_tasks.MarkL7PolicyPendingUpdateInDB(
             requires=constants.L7POLICY))
+        update_l7policy_flow.add(
+            model_tasks.UpdateAttributes(
+                rebind={constants.OBJECT: constants.L7POLICY},
+                requires=[constants.UPDATE_DICT]))
         update_l7policy_flow.add(amphora_driver_tasks.ListenersUpdate(
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
         update_l7policy_flow.add(database_tasks.UpdateL7PolicyInDB(

@@ -1,5 +1,0 @@
----
-features:
-  - |
-    Added a new endpoint /v2.0/octavia/amphorae to expose internal details
-    about amphorae. This endpoint is admin only.

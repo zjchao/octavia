@@ -23,8 +23,7 @@ class TestListenerStatistics(base.BaseAPITest):
 
     def setUp(self):
         super(TestListenerStatistics, self).setUp()
-        self.lb = self.create_load_balancer(
-            {'subnet_id': uuidutils.generate_uuid()})
+        self.lb = self.create_load_balancer({})
         self.set_lb_status(self.lb.get('id'))
         self.listener = self.create_listener(self.lb.get('id'),
                                              constants.PROTOCOL_HTTP, 80)
@@ -37,15 +36,8 @@ class TestListenerStatistics(base.BaseAPITest):
     def test_get(self):
         ls = self.create_listener_stats(listener_id=self.listener.get('id'),
                                         amphora_id=self.amphora.id)
-        expected = {
-            'listener': {
-                'bytes_in': ls['bytes_in'],
-                'bytes_out': ls['bytes_out'],
-                'active_connections': ls['active_connections'],
-                'total_connections': ls['total_connections'],
-                'request_errors': ls['request_errors']
-            }
-        }
+        ls.pop('listener_id')
+        ls.pop('amphora_id')
         response = self.get(self.ls_path)
         response_body = response.json
-        self.assertEqual(expected, response_body)
+        self.assertEqual(ls, response_body)

@@ -12,7 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import ipaddress
 import time
 
 from neutronclient.common import exceptions as neutron_client_exceptions
@@ -20,24 +19,28 @@ from novaclient import exceptions as nova_client_exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 import six
-from stevedore import driver as stevedore_driver
 
+from octavia.common import clients
 from octavia.common import constants
 from octavia.common import data_models
-from octavia.common import exceptions
-from octavia.i18n import _
+from octavia.i18n import _LE, _LI, _LW
 from octavia.network import base
 from octavia.network import data_models as n_data_models
 from octavia.network.drivers.neutron import base as neutron_base
 from octavia.network.drivers.neutron import utils
 
+import ipaddress
+
+
 LOG = logging.getLogger(__name__)
 AAP_EXT_ALIAS = 'allowed-address-pairs'
-PROJECT_ID_ALIAS = 'project-id'
 VIP_SECURITY_GRP_PREFIX = 'lb-'
 OCTAVIA_OWNER = 'Octavia'
 
 CONF = cfg.CONF
+CONF.import_group('nova', 'octavia.common.config')
+CONF.import_group('controller_worker', 'octavia.common.config')
+CONF.import_group('networking', 'octavia.common.config')
 
 
 class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
@@ -45,11 +48,14 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
     def __init__(self):
         super(AllowedAddressPairsDriver, self).__init__()
         self._check_aap_loaded()
-        self.compute = stevedore_driver.DriverManager(
-            namespace='octavia.compute.drivers',
-            name=CONF.controller_worker.compute_driver,
-            invoke_on_load=True
-        ).driver
+        self.nova_client = clients.NovaAuth.get_nova_client(
+            endpoint=CONF.nova.endpoint,
+            region=CONF.nova.region_name,
+            endpoint_type=CONF.nova.endpoint_type,
+            service_name=CONF.nova.service_name,
+            insecure=CONF.nova.insecure,
+            cacert=CONF.nova.ca_certificates_file
+        )
 
     def _check_aap_loaded(self):
         if not self._check_extension_enabled(AAP_EXT_ALIAS):
@@ -71,37 +77,31 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
                     ret.append(interface)
         return ret
 
-    def _get_plugged_interface(self, compute_id, network_id, lb_network_ip):
+    def _get_plugged_interface(self, compute_id, network_id):
         interfaces = self.get_plugged_networks(compute_id)
         for interface in interfaces:
-            is_correct_interface = interface.network_id == network_id
-            for ip in interface.fixed_ips:
-                if ip.ip_address == lb_network_ip:
-                    is_correct_interface = False
-            if is_correct_interface:
+            if interface.network_id == network_id:
                 return interface
-        return None
 
-    def _plug_amphora_vip(self, amphora, subnet):
+    def _plug_amphora_vip(self, amphora, network_id):
         # We need a vip port owned by Octavia for Act/Stby and failover
         try:
             port = {'port': {'name': 'octavia-lb-vrrp-' + amphora.id,
-                             'network_id': subnet.network_id,
-                             'fixed_ips': [{'subnet_id': subnet.id}],
+                             'network_id': network_id,
                              'admin_state_up': True,
                              'device_owner': OCTAVIA_OWNER}}
             new_port = self.neutron_client.create_port(port)
             new_port = utils.convert_port_dict_to_model(new_port)
 
-            LOG.debug('Created vip port: %(port_id)s for amphora: %(amp)s',
-                      {'port_id': new_port.id, 'amp': amphora.id})
+            LOG.debug('Created vip port: {port_id} for amphora: {amp}'.format(
+                port_id=new_port.id, amp=amphora.id))
 
             interface = self.plug_port(amphora, new_port)
         except Exception:
-            message = _('Error plugging amphora (compute_id: {compute_id}) '
-                        'into vip network {network_id}.').format(
-                            compute_id=amphora.compute_id,
-                            network_id=subnet.network_id)
+            message = _LE('Error plugging amphora (compute_id: {compute_id}) '
+                          'into vip network {network_id}.').format(
+                              compute_id=amphora.compute_id,
+                              network_id=network_id)
             LOG.exception(message)
             raise base.PlugVIPException(message)
         return interface
@@ -110,11 +110,11 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
         try:
             self._add_allowed_address_pair_to_port(port_id, vip_address)
         except neutron_client_exceptions.PortNotFoundClient as e:
-            raise base.PortNotFound(str(e))
+                raise base.PortNotFound(e.message)
         except Exception:
-            message = _('Error adding allowed address pair {ip} '
-                        'to port {port_id}.').format(ip=vip_address,
-                                                     port_id=port_id)
+            message = _LE('Error adding allowed address pair {ip} '
+                          'to port {port_id}.').format(ip=vip_address,
+                                                       port_id=port_id)
             LOG.exception(message)
             raise base.PlugVIPException(message)
 
@@ -123,64 +123,45 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
         sec_grps = self.neutron_client.list_security_groups(name=sec_grp_name)
         if sec_grps and sec_grps.get('security_groups'):
             return sec_grps.get('security_groups')[0]
-        return None
 
     def _get_ethertype_for_ip(self, ip):
         address = ipaddress.ip_address(
-            ip if isinstance(ip, six.text_type) else six.u(ip))
-        return 'IPv6' if address.version == 6 else 'IPv4'
+            ip if six.text_type == type(ip) else six.u(ip))
+        return 'IPv6' if address.version is 6 else 'IPv4'
 
     def _update_security_group_rules(self, load_balancer, sec_grp_id):
         rules = self.neutron_client.list_security_group_rules(
             security_group_id=sec_grp_id)
         updated_ports = [
-            (listener.protocol_port,
-             constants.PROTOCOL_TCP.lower()
-             if listener.protocol != constants.PROTOCOL_UDP else
-             constants.PROTOCOL_UDP.lower())
-            for listener in load_balancer.listeners
+            listener.protocol_port for listener in load_balancer.listeners
             if listener.provisioning_status != constants.PENDING_DELETE and
             listener.provisioning_status != constants.DELETED]
-        # As the peer port will hold the tcp connection for keepalived and
-        # haproxy session synchronization, so here the security group rule
-        # should be just related with tcp protocol only.
         peer_ports = [
-            (listener.peer_port,
-             constants.PROTOCOL_TCP.lower())
-            for listener in load_balancer.listeners
+            listener.peer_port for listener in load_balancer.listeners
             if listener.provisioning_status != constants.PENDING_DELETE and
             listener.provisioning_status != constants.DELETED]
         updated_ports.extend(peer_ports)
         # Just going to use port_range_max for now because we can assume that
         # port_range_max and min will be the same since this driver is
         # responsible for creating these rules
-        old_ports = [(rule.get('port_range_max'), rule.get('protocol'))
+        old_ports = [rule.get('port_range_max')
                      for rule in rules.get('security_group_rules', [])
                      # Don't remove egress rules and don't
                      # confuse other protocols with None ports
                      # with the egress rules.  VRRP uses protocol
                      # 51 and 112
                      if rule.get('direction') != 'egress' and
-                     rule.get('protocol', '').lower() in ['tcp', 'udp']]
+                     rule.get('protocol').lower() == 'tcp']
         add_ports = set(updated_ports) - set(old_ports)
         del_ports = set(old_ports) - set(updated_ports)
         for rule in rules.get('security_group_rules', []):
-            if (rule.get('protocol', '') and
-                    rule.get('protocol', '').lower() in ['tcp', 'udp'] and
-                    (rule.get('port_range_max'),
-                     rule.get('protocol')) in del_ports):
-                rule_id = rule.get('id')
-                try:
-                    self.neutron_client.delete_security_group_rule(rule_id)
-                except neutron_client_exceptions.NotFound:
-                    LOG.info("Security group rule %s not found, will assume "
-                             "it is already deleted.", rule_id)
+            if rule.get('port_range_max') in del_ports:
+                self.neutron_client.delete_security_group_rule(rule.get('id'))
 
         ethertype = self._get_ethertype_for_ip(load_balancer.vip.ip_address)
-        for port_protocol in add_ports:
-            self._create_security_group_rule(sec_grp_id, port_protocol[1],
-                                             port_min=port_protocol[0],
-                                             port_max=port_protocol[0],
+        for port in add_ports:
+            self._create_security_group_rule(sec_grp_id, 'TCP', port_min=port,
+                                             port_max=port,
                                              ethertype=ethertype)
 
         # Currently we are using the VIP network for VRRP
@@ -239,114 +220,77 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
         while attempts <= CONF.networking.max_retries:
             try:
                 self.neutron_client.delete_security_group(sec_grp)
-                LOG.info("Deleted security group %s", sec_grp)
+                LOG.info(_LI("Deleted security group %s"), sec_grp)
                 return
             except neutron_client_exceptions.NotFound:
-                LOG.info("Security group %s not found, will assume it is "
-                         "already deleted", sec_grp)
+                LOG.info(_LI("Security group %s not found, will assume it is "
+                             "already deleted"), sec_grp)
                 return
             except Exception:
-                LOG.warning("Attempt %(attempt)s to remove security group "
-                            "%(sg)s failed.",
+                LOG.warning(_LW("Attempt %(attempt)s to remove security group "
+                                "%(sg)s failed."),
                             {'attempt': attempts + 1, 'sg': sec_grp})
             attempts += 1
             time.sleep(CONF.networking.retry_interval)
-        message = _("All attempts to remove security group {0} have "
-                    "failed.").format(sec_grp)
+        message = _LE("All attempts to remove security group {0} have "
+                      "failed.").format(sec_grp)
         LOG.exception(message)
         raise base.DeallocateVIPException(message)
+
+    @staticmethod
+    def _filter_amphora(amp):
+        return amp.status == constants.AMPHORA_ALLOCATED
 
     def _delete_security_group(self, vip, port):
         if self.sec_grp_enabled:
             sec_grp = self._get_lb_security_group(vip.load_balancer.id)
             if sec_grp:
-                sec_grp_id = sec_grp.get('id')
+                sec_grp = sec_grp.get('id')
                 LOG.info(
-                    "Removing security group %(sg)s from port %(port)s",
-                    {'sg': sec_grp_id, 'port': vip.port_id})
-                raw_port = None
-                try:
-                    if port:
-                        raw_port = self.neutron_client.show_port(port.id)
-                except Exception:
-                    LOG.warning('Unable to get port information for port '
-                                '%s. Continuing to delete the security '
-                                'group.', port.id)
-                if raw_port:
-                    sec_grps = raw_port.get(
-                        'port', {}).get('security_groups', [])
-                    if sec_grp_id in sec_grps:
-                        sec_grps.remove(sec_grp_id)
-                        port_update = {'port': {'security_groups': sec_grps}}
-                        try:
-                            self.neutron_client.update_port(port.id,
-                                                            port_update)
-                        except neutron_client_exceptions.PortNotFoundClient:
-                            LOG.warning('Unable to update port information '
-                                        'for port %s. Continuing to delete '
-                                        'the security group since port not '
-                                        'found', port.id)
-
-                try:
-                    self._delete_vip_security_group(sec_grp_id)
-                except base.DeallocateVIPException:
-                    # Try to delete any leftover ports on this security group.
-                    # Because this security group is created and managed by us,
-                    # it *should* only return ports that we own / can delete.
-                    LOG.warning('Failed to delete security group on first '
-                                'pass: %s', sec_grp_id)
-                    extra_ports = self._get_ports_by_security_group(sec_grp_id)
-                    for extra_port in extra_ports:
-                        port_id = extra_port.get('id')
-                        try:
-                            LOG.warning('Deleting extra port %s on security '
-                                        'group %s...', port_id, sec_grp_id)
-                            self.neutron_client.delete_port(port_id)
-                        except Exception:
-                            LOG.warning('Failed to delete extra port %s on '
-                                        'security group %s.',
-                                        port_id, sec_grp_id)
-                    # Now try it again
-                    self._delete_vip_security_group(sec_grp_id)
+                    _LI("Removing security group %(sg)s from port %(port)s"),
+                    {'sg': sec_grp, 'port': vip.port_id})
+                raw_port = self.neutron_client.show_port(port.id)
+                sec_grps = raw_port.get('port', {}).get('security_groups', [])
+                if sec_grp in sec_grps:
+                    sec_grps.remove(sec_grp)
+                port_update = {'port': {'security_groups': sec_grps}}
+                self.neutron_client.update_port(port.id, port_update)
+                self._delete_vip_security_group(sec_grp)
 
     def deallocate_vip(self, vip):
         """Delete the vrrp_port (instance port) in case nova didn't
 
         This can happen if a failover has occurred.
         """
-        for amphora in vip.load_balancer.amphorae:
-            try:
+        try:
+            for amphora in six.moves.filter(self._filter_amphora,
+                                            vip.load_balancer.amphorae):
                 self.neutron_client.delete_port(amphora.vrrp_port_id)
-            except (neutron_client_exceptions.NotFound,
-                    neutron_client_exceptions.PortNotFoundClient):
-                LOG.debug('VIP instance port %s already deleted. Skipping.',
-                          amphora.vrrp_port_id)
+        except (neutron_client_exceptions.NotFound,
+                neutron_client_exceptions.PortNotFoundClient):
+            LOG.debug('VIP instance port {0} already deleted.  '
+                      'Skipping.'.format(amphora.vrrp_port_id))
 
         try:
             port = self.get_port(vip.port_id)
         except base.PortNotFound:
-            LOG.warning("Can't deallocate VIP because the vip port {0} "
-                        "cannot be found in neutron. "
-                        "Continuing cleanup.".format(vip.port_id))
-            port = None
+            msg = ("Can't deallocate VIP because the vip port {0} cannot be "
+                   "found in neutron".format(vip.port_id))
+            raise base.VIPConfigurationNotFound(msg)
 
         self._delete_security_group(vip, port)
 
-        if port and port.device_owner == OCTAVIA_OWNER:
+        if port.device_owner == OCTAVIA_OWNER:
             try:
                 self.neutron_client.delete_port(vip.port_id)
-            except (neutron_client_exceptions.NotFound,
-                    neutron_client_exceptions.PortNotFoundClient):
-                LOG.debug('VIP port %s already deleted. Skipping.',
-                          vip.port_id)
             except Exception:
-                message = _('Error deleting VIP port_id {port_id} from '
-                            'neutron').format(port_id=vip.port_id)
+                message = _LE('Error deleting VIP port_id {port_id} from '
+                              'neutron').format(port_id=vip.port_id)
                 LOG.exception(message)
                 raise base.DeallocateVIPException(message)
-        elif port:
-            LOG.info("Port %s will not be deleted by Octavia as it was "
-                     "not created by Octavia.", vip.port_id)
+        else:
+            LOG.info(_LI("Port %s will not be deleted by Octavia as it was "
+                         "not created by Octavia."), vip.port_id)
 
     def plug_vip(self, load_balancer, vip):
         if self.sec_grp_enabled:
@@ -357,10 +301,10 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
             lambda amp: amp.status == constants.AMPHORA_ALLOCATED,
                 load_balancer.amphorae):
 
-            interface = self._get_plugged_interface(
-                amphora.compute_id, subnet.network_id, amphora.lb_network_ip)
+            interface = self._get_plugged_interface(amphora.compute_id,
+                                                    subnet.network_id)
             if not interface:
-                interface = self._plug_amphora_vip(amphora, subnet)
+                interface = self._plug_amphora_vip(amphora, subnet.network_id)
 
             self._add_vip_address_pair(interface.port_id, vip.ip_address)
             if self.sec_grp_enabled:
@@ -368,9 +312,7 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
                                                      interface.port_id)
             vrrp_ip = None
             for fixed_ip in interface.fixed_ips:
-                is_correct_subnet = fixed_ip.subnet_id == subnet.id
-                is_management_ip = fixed_ip.ip_address == amphora.lb_network_ip
-                if is_correct_subnet and not is_management_ip:
+                if fixed_ip.subnet_id == subnet.id:
                     vrrp_ip = fixed_ip.ip_address
                     break
             plugged_amphorae.append(data_models.Amphora(
@@ -383,46 +325,33 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
         return plugged_amphorae
 
     def allocate_vip(self, load_balancer):
+        if not load_balancer.vip.port_id and not load_balancer.vip.subnet_id:
+            raise base.AllocateVIPException('Cannot allocate a vip '
+                                            'without a port_id or '
+                                            'a subnet_id.')
         if load_balancer.vip.port_id:
-            LOG.info('Port %s already exists. Nothing to be done.',
+            LOG.info(_LI('Port %s already exists. Nothing to be done.'),
                      load_balancer.vip.port_id)
             port = self.get_port(load_balancer.vip.port_id)
             return self._port_to_vip(port, load_balancer)
 
-        fixed_ip = {}
-        if load_balancer.vip.subnet_id:
-            fixed_ip['subnet_id'] = load_balancer.vip.subnet_id
-        if load_balancer.vip.ip_address:
-            fixed_ip['ip_address'] = load_balancer.vip.ip_address
-
-        # Make sure we are backward compatible with older neutron
-        if self._check_extension_enabled(PROJECT_ID_ALIAS):
-            project_id_key = 'project_id'
-        else:
-            project_id_key = 'tenant_id'
+        # Must retrieve the network_id from the subnet
+        subnet = self.get_subnet(load_balancer.vip.subnet_id)
 
         # It can be assumed that network_id exists
         port = {'port': {'name': 'octavia-lb-' + load_balancer.id,
-                         'network_id': load_balancer.vip.network_id,
+                         'network_id': subnet.network_id,
                          'admin_state_up': False,
                          'device_id': 'lb-{0}'.format(load_balancer.id),
-                         'device_owner': OCTAVIA_OWNER,
-                         project_id_key: load_balancer.project_id}}
-
-        if fixed_ip:
-            port['port']['fixed_ips'] = [fixed_ip]
+                         'device_owner': OCTAVIA_OWNER}}
         try:
             new_port = self.neutron_client.create_port(port)
-        except Exception as e:
-            message = _('Error creating neutron port on network '
-                        '{network_id}.').format(
-                network_id=load_balancer.vip.network_id)
+        except Exception:
+            message = _LE('Error creating neutron port on network '
+                          '{network_id}.').format(
+                network_id=subnet.network_id)
             LOG.exception(message)
-            raise base.AllocateVIPException(
-                message,
-                orig_msg=getattr(e, 'message', None),
-                orig_code=getattr(e, 'status_code', None),
-            )
+            raise base.AllocateVIPException(message)
         new_port = utils.convert_port_dict_to_model(new_port)
         return self._port_to_vip(new_port, load_balancer)
 
@@ -430,20 +359,20 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
         try:
             subnet = self.get_subnet(vip.subnet_id)
         except base.SubnetNotFound:
-            msg = ("Can't unplug vip because vip subnet {0} was not "
-                   "found").format(vip.subnet_id)
+            msg = _LE("Can't unplug vip because vip subnet {0} was not "
+                      "found").format(vip.subnet_id)
             LOG.exception(msg)
             raise base.PluggedVIPNotFound(msg)
         for amphora in six.moves.filter(
             lambda amp: amp.status == constants.AMPHORA_ALLOCATED,
                 load_balancer.amphorae):
 
-            interface = self._get_plugged_interface(
-                amphora.compute_id, subnet.network_id, amphora.lb_network_ip)
+            interface = self._get_plugged_interface(amphora.compute_id,
+                                                    subnet.network_id)
             if not interface:
                 # Thought about raising PluggedVIPNotFound exception but
                 # then that wouldn't evaluate all amphorae, so just continue
-                LOG.debug('Cannot get amphora %s interface, skipped',
+                LOG.debug(_LI('Cannot get amphora %s interface, skipped'),
                           amphora.compute_id)
                 continue
             try:
@@ -457,9 +386,9 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
                 self.neutron_client.update_port(interface.port_id,
                                                 aap_update)
             except Exception:
-                message = _('Error unplugging VIP. Could not clear '
-                            'allowed address pairs from port '
-                            '{port_id}.').format(port_id=vip.port_id)
+                message = _LE('Error unplugging VIP. Could not clear '
+                              'allowed address pairs from port '
+                              '{port_id}.').format(port_id=vip.port_id)
                 LOG.exception(message)
                 raise base.UnplugVIPException(message)
 
@@ -468,31 +397,31 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
                 port = self.get_port(amphora.vrrp_port_id)
                 if port.name.startswith('octavia-lb-vrrp-'):
                     self.neutron_client.delete_port(amphora.vrrp_port_id)
-            except (neutron_client_exceptions.NotFound,
-                    neutron_client_exceptions.PortNotFoundClient):
+            except base.PortNotFound:
                 pass
             except Exception as e:
-                LOG.error('Failed to delete port.  Resources may still be in '
-                          'use for port: %(port)s due to error: %s(except)s',
+                LOG.error(_LE('Failed to delete port.  Resources may still '
+                              'be in use for port: %(port)s due to '
+                              'error: %s(except)s'),
                           {'port': amphora.vrrp_port_id, 'except': e})
 
     def plug_network(self, compute_id, network_id, ip_address=None):
         try:
-            interface = self.compute.attach_network_or_port(
-                compute_id=compute_id, network_id=network_id,
-                ip_address=ip_address)
+            interface = self.nova_client.servers.interface_attach(
+                server=compute_id, net_id=network_id, fixed_ip=ip_address,
+                port_id=None)
         except nova_client_exceptions.NotFound as e:
-            if 'Instance' in str(e):
-                raise base.AmphoraNotFound(str(e))
-            elif 'Network' in str(e):
-                raise base.NetworkNotFound(str(e))
+            if 'Instance' in e.message:
+                raise base.AmphoraNotFound(e.message)
+            elif 'Network' in e.message:
+                raise base.NetworkNotFound(e.message)
             else:
-                raise base.PlugNetworkException(str(e))
+                raise base.PlugNetworkException(e.message)
         except Exception:
-            message = _('Error plugging amphora (compute_id: {compute_id}) '
-                        'into network {network_id}.').format(
-                            compute_id=compute_id,
-                            network_id=network_id)
+            message = _LE('Error plugging amphora (compute_id: {compute_id}) '
+                          'into network {network_id}.').format(
+                              compute_id=compute_id,
+                              network_id=network_id)
             LOG.exception(message)
             raise base.PlugNetworkException(message)
 
@@ -503,31 +432,37 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
         if not interfaces:
             msg = ('Amphora with compute id {compute_id} does not have any '
                    'plugged networks').format(compute_id=compute_id)
-            raise base.NetworkNotFound(msg)
+            raise base.AmphoraNotFound(msg)
 
         unpluggers = self._get_interfaces_to_unplug(interfaces, network_id,
                                                     ip_address=ip_address)
-        for index, unplugger in enumerate(unpluggers):
-            self.compute.detach_port(
-                compute_id=compute_id, port_id=unplugger.port_id)
+        try:
+            for index, unplugger in enumerate(unpluggers):
+                self.nova_client.servers.interface_detach(
+                    server=compute_id, port_id=unplugger.port_id)
+        except Exception:
+            message = _LE('Error unplugging amphora {amphora_id} from network '
+                          '{network_id}.').format(amphora_id=compute_id,
+                                                  network_id=network_id)
+            if len(unpluggers) > 1:
+                message = _LE('{base} Other interfaces have been successfully '
+                              'unplugged: ').format(base=message)
+                unpluggeds = unpluggers[:index]
+                for unplugged in unpluggeds:
+                    message = _LE('{base} neutron port '
+                                  '{port_id} ').format(
+                                      base=message, port_id=unplugged.port_id)
+            else:
+                message = _LE('{base} No other networks were '
+                              'unplugged.').format(base=message)
+            LOG.exception(message)
+            raise base.UnplugNetworkException(message)
 
-    def update_vip(self, load_balancer, for_delete=False):
+    def update_vip(self, load_balancer):
         sec_grp = self._get_lb_security_group(load_balancer.id)
-        if sec_grp:
-            self._update_security_group_rules(load_balancer, sec_grp.get('id'))
-        elif not for_delete:
-            raise exceptions.MissingVIPSecurityGroup(lb_id=load_balancer.id)
-        else:
-            LOG.warning('VIP security group missing when updating the VIP for '
-                        'delete on load balancer: {lb_id}. Skipping update '
-                        'because this is for delete.'.format(
-                            lb_id=load_balancer.id))
+        self._update_security_group_rules(load_balancer, sec_grp.get('id'))
 
     def failover_preparation(self, amphora):
-        if self.dns_integration_enabled:
-            self._failover_preparation(amphora)
-
-    def _failover_preparation(self, amphora):
         interfaces = self.get_plugged_networks(compute_id=amphora.compute_id)
 
         ports = []
@@ -543,41 +478,44 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
 
         for port in ports:
             try:
-                self.neutron_client.update_port(port.id,
-                                                {'port': {'dns_name': ''}})
+
+                if self.dns_integration_enabled:
+                    self.neutron_client.update_port(port.id,
+                                                    {'port': {'dns_name': ''}})
 
             except (neutron_client_exceptions.NotFound,
                     neutron_client_exceptions.PortNotFoundClient):
                 raise base.PortNotFound()
 
     def plug_port(self, amphora, port):
+        plugged_interface = None
         try:
-            interface = self.compute.attach_network_or_port(
-                compute_id=amphora.compute_id, network_id=None,
-                ip_address=None, port_id=port.id)
+            interface = self.nova_client.servers.interface_attach(
+                server=amphora.compute_id, net_id=None,
+                fixed_ip=None, port_id=port.id)
             plugged_interface = self._nova_interface_to_octavia_interface(
                 amphora.compute_id, interface)
         except nova_client_exceptions.NotFound as e:
-            if 'Instance' in str(e):
-                raise base.AmphoraNotFound(str(e))
-            elif 'Network' in str(e):
-                raise base.NetworkNotFound(str(e))
+            if 'Instance' in e.message:
+                raise base.AmphoraNotFound(e.message)
+            elif 'Network' in e.message:
+                raise base.NetworkNotFound(e.message)
             else:
-                raise base.PlugNetworkException(str(e))
+                raise base.PlugNetworkException(e.message)
         except nova_client_exceptions.Conflict:
-            LOG.info('Port %(portid)s is already plugged, '
-                     'skipping', {'portid': port.id})
+            LOG.info(_LI('Port %(portid)s is already plugged, '
+                     'skipping') % {'portid': port.id})
             plugged_interface = n_data_models.Interface(
                 compute_id=amphora.compute_id,
                 network_id=port.network_id,
                 port_id=port.id,
                 fixed_ips=port.fixed_ips)
         except Exception:
-            message = _('Error plugging amphora (compute_id: '
-                        '{compute_id}) into port '
-                        '{port_id}.').format(
-                            compute_id=amphora.compute_id,
-                            port_id=port.id)
+            message = _LE('Error plugging amphora (compute_id: '
+                          '{compute_id}) into port '
+                          '{port_id}.').format(
+                              compute_id=amphora.compute_id,
+                              port_id=port.id)
             LOG.exception(message)
             raise base.PlugNetworkException(message)
 
@@ -593,7 +531,6 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
                 vrrp_port = self.get_port(amp.vrrp_port_id)
                 vrrp_subnet = self.get_subnet(
                     vrrp_port.get_subnet_id(amp.vrrp_ip))
-                vrrp_port.network = self.get_network(vrrp_port.network_id)
                 ha_port = self.get_port(amp.ha_port_id)
                 ha_subnet = self.get_subnet(
                     ha_port.get_subnet_id(amp.ha_ip))
@@ -658,4 +595,4 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
 
             except (neutron_client_exceptions.NotFound,
                     neutron_client_exceptions.PortNotFoundClient):
-                pass
+                    pass

@@ -12,20 +12,21 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from concurrent import futures
 import datetime
 
+from concurrent import futures
 from oslo_config import cfg
 from oslo_log import log as logging
-from sqlalchemy.orm import exc as sqlalchemy_exceptions
 
 from octavia.common import constants
 from octavia.controller.worker import controller_worker as cw
 from octavia.db import api as db_api
 from octavia.db import repositories as repo
+from octavia.i18n import _LI
 
 LOG = logging.getLogger(__name__)
 CONF = cfg.CONF
+CONF.import_group('house_keeping', 'octavia.common.config')
 
 
 class SpareAmphora(object):
@@ -47,17 +48,17 @@ class SpareAmphora(object):
 
         # When the current spare amphora is less than required
         if diff_count > 0:
-            LOG.info("Initiating creation of %d spare amphora.", diff_count)
+            LOG.info(_LI("Initiating creation of %d spare amphora.") %
+                     diff_count)
 
             # Call Amphora Create Flow diff_count times
-            with futures.ThreadPoolExecutor(
-                    max_workers=CONF.house_keeping.spare_amphora_pool_size
-            ) as executor:
-                for i in range(1, diff_count + 1):
-                    LOG.debug("Starting amphorae number %d ...", i)
-                    executor.submit(self.cw.create_amphora)
+            for i in range(1, diff_count + 1):
+                LOG.debug("Starting amphorae number %d ...", i)
+                self.cw.create_amphora()
+
         else:
-            LOG.debug("Current spare amphora count satisfies the requirement")
+            LOG.debug(_LI("Current spare amphora count satisfies the "
+                          "requirement"))
 
 
 class DatabaseCleanup(object):
@@ -67,29 +68,19 @@ class DatabaseCleanup(object):
         self.lb_repo = repo.LoadBalancerRepository()
 
     def delete_old_amphorae(self):
-        """Checks the DB for old amphora and deletes them based on its age."""
+        """Checks the DB for old amphora and deletes them based on it's age."""
         exp_age = datetime.timedelta(
             seconds=CONF.house_keeping.amphora_expiry_age)
 
         session = db_api.get_session()
-        expiring_amphora = self.amp_repo.get_all_deleted_expiring_amphora(
-            session, exp_age=exp_age)
+        amphora = self.amp_repo.get_all(session, status=constants.DELETED)
 
-        for amp in expiring_amphora:
-            # If we're here, we already think the amp is expiring according to
-            # the amphora table. Now check it is expired in the health table.
-            # In this way, we ensure that amps aren't deleted unless they are
-            # both expired AND no longer receiving zombie heartbeats.
-            if self.amp_health_repo.check_amphora_health_expired(
-                    session, amp.id, exp_age):
-                LOG.debug('Attempting to purge db record for Amphora ID: %s',
-                          amp.id)
+        for amp in amphora:
+            if self.amp_health_repo.check_amphora_expired(session, amp.id,
+                                                          exp_age):
+                LOG.info(_LI('Attempting to delete Amphora id : %s'), amp.id)
                 self.amp_repo.delete(session, id=amp.id)
-                try:
-                    self.amp_health_repo.delete(session, amphora_id=amp.id)
-                except sqlalchemy_exceptions.NoResultFound:
-                    pass  # Best effort delete, this record might not exist
-                LOG.info('Purged db record for Amphora ID: %s', amp.id)
+                LOG.info(_LI('Deleted Amphora id : %s') % amp.id)
 
     def cleanup_load_balancers(self):
         """Checks the DB for old load balancers and triggers their removal."""
@@ -97,15 +88,16 @@ class DatabaseCleanup(object):
             seconds=CONF.house_keeping.load_balancer_expiry_age)
 
         session = db_api.get_session()
-        load_balancers, _ = self.lb_repo.get_all(
+        load_balancers = self.lb_repo.get_all(
             session, provisioning_status=constants.DELETED)
 
         for lb in load_balancers:
             if self.lb_repo.check_load_balancer_expired(session, lb.id,
                                                         exp_age):
-                LOG.info('Attempting to delete load balancer id : %s', lb.id)
+                LOG.info(_LI('Attempting to delete load balancer id : %s'),
+                         lb.id)
                 self.lb_repo.delete(session, id=lb.id)
-                LOG.info('Deleted load balancer id : %s', lb.id)
+                LOG.info(_LI('Deleted load balancer id : %s') % lb.id)
 
 
 class CertRotation(object):
@@ -118,14 +110,18 @@ class CertRotation(object):
         amp_repo = repo.AmphoraRepository()
 
         with futures.ThreadPoolExecutor(max_workers=self.threads) as executor:
-            session = db_api.get_session()
-            rotation_count = 0
-            while True:
-                amp = amp_repo.get_cert_expiring_amphora(session)
-                if not amp:
-                    break
-                rotation_count += 1
-                LOG.debug("Cert expired amphora's id is: %s", amp.id)
-                executor.submit(self.cw.amphora_cert_rotation, amp.id)
-            if rotation_count > 0:
-                LOG.info("Rotated certificates for %s amphora", rotation_count)
+            try:
+                session = db_api.get_session()
+                rotation_count = 0
+                while True:
+                    amp = amp_repo.get_cert_expiring_amphora(session)
+                    if not amp:
+                        break
+                    rotation_count += 1
+                    LOG.debug("Cert expired amphora's id is: %s", amp.id)
+                    executor.submit(self.cw.amphora_cert_rotation, amp.id)
+                if rotation_count > 0:
+                    LOG.info(_LI("Rotated certificates for %s amphora") %
+                             rotation_count)
+            finally:
+                executor.shutdown(wait=True)

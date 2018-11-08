@@ -4,7 +4,7 @@ This project was ultimately spawned from work done on the Neutron project.
 As such, we tend to follow Neutron conventions regarding coding style.
 
 - We follow the OpenStack Style Commandments:
-  https://docs.openstack.org/hacking/latest
+  http://docs.openstack.org/developer/hacking/
 
 Octavia Specific Commandments
 -----------------------------
@@ -13,6 +13,7 @@ Octavia Specific Commandments
 - [O318] Change assert(Not)Equal(A, None) or assert(Not)Equal(None, A)
   by optimal assert like assertIs(Not)None(A).
 - [O319] Validate that debug level logs are not translated.
+- [O320] Validate that LOG messages, except debug ones, have translations
 - [O321] Validate that jsonutils module is used instead of json
 - [O322] Don't use author tags
 - [O323] Change assertEqual(True, A) or assertEqual(False, A) to the more
@@ -23,13 +24,6 @@ Octavia Specific Commandments
   specific assertIn/NotIn(A, B)
 - [O339] LOG.warn() is not allowed. Use LOG.warning()
 - [O340] Don't use xrange()
-- [O341] Don't translate logs.
-- [0342] Exception messages should be translated
-- [O343] Python 3: do not use basestring.
-- [O344] Python 3: do not use dict.iteritems.
-- [O345] Usage of Python eventlet module not allowed
-- [O346] Don't use backslashes for line continuation.
-- [O347] Taskflow revert methods must have \*\*kwargs.
 
 Creating Unit Tests
 -------------------
